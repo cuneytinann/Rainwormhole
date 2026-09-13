@@ -1,0 +1,1429 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<title>Rainwormhole</title>
+<link rel=icon href="data:,">
+<style>
+  html,body{margin:0;height:100%;background:#0d0f1a;overflow:hidden}
+  canvas{display:block;cursor:crosshair;touch-action:none}
+html,body{overscroll-behavior:none;touch-action:none;-webkit-user-select:none;user-select:none;-webkit-tap-highlight-color:transparent}
+.tb{position:fixed;display:flex;align-items:center;justify-content:center;
+ background:rgba(255,255,255,.07);border:1.5px solid rgba(255,255,255,.22);
+ border-radius:16px;color:#cfd6ee;font:26px sans-serif;z-index:9;touch-action:none}
+.tb:active{background:rgba(255,255,255,.16)}
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<script>
+/* ============================================================
+   RAINWORMHOLE — js13k 2026 (Unicorns and Rainbows)
+
+   Sol tik = BOYNUZ portali    Sag tik = KUYRUK portali
+   A/D kos   W/Space zipla   E kup al/birak   R bastan   N sonraki
+   ============================================================ */
+
+const C=document.getElementById('c');
+const X=C.getContext('2d');
+
+const T=24, COLS=26, ROWS=14, W=COLS*T, H=ROWS*T;
+
+/* ---------- hareket ---------- */
+const GRAV=0.42, RUN=2.4, ACC_G=0.55, ACC_A=0.30;
+const STOP_G=0.55, STOP_A=0.03, AIRCAP=4.2, DRAG_G=0.90;
+const JUMP=6.6, MAXV=17, BOOST=1.12, PUSH=1.7, COYOTE=6, BUFFER=6;
+
+/* ---------- tunel akisi ---------- */
+// --- DORT VURUS (Anstis & Rogers) ---
+// Desen sadece CEYREK periyot ileri-geri salinir; bir dongudeki net yer
+// degistirmesi tam olarak SIFIRDIR. Ileri adimlar normal kontrastla atilir
+// (duz phi -> ileri okunur), geri adimlar kontrast ters cevrilerek atilir
+// (ters-phi -> yine ileri okunur). Dort gecisin dordu de ayni yonde
+// okundugu icin hicbir yere gitmeyen desen sonsuz akiyor gorunur.
+// Yonu 'dir' belirler: sicak yari +1, soguk yari -1 -> zit algilanirlar.
+const FS_BAND=12;   // enine renk seridi  (tezgah: serit sayisi 12)
+const FS_K=4;       // boru boyunca kac dalga  (tezgah: siklik 4.00)
+const FS_NT=28;     // boyunca kac dilim (dalga cozunurlugu)
+const FS_MS=67;     // ADIM basina ms — duvar saatinden, kare hizindan bagimsiz.
+                    // 67 ms = tezgahtaki "hiz 0.50" degerinin 60Hz karsiligi.
+                    // Iki adimda bir tam cevrim -> 7.5 Hz karsi-faz.
+const FS_L0=50;     // orta aciklik %
+const FS_AMP=12;    // genlik % — ISIGA DUYARLILIK icin dusuk tutuldu.
+                    // 22 iken WCAG 2.3.1 "cakan alan" %7.18 idi, 12'de %5.88.
+                    // Karsi-faz ILLUZYONU genlikten bagimsiz (iki durum hala
+                    // birbirinin tam negatifi), sadece siddeti azaliyor.
+                    // Ayarlamak icin: arac/genlik-tezgahi.html
+const FS_SAT=92;    // doygunluk %
+let TW0=11,TW1=11;
+const TUBE_SEG=22, TB_H0=2, TB_H1=288;
+
+/* ---------- portal spirali ---------- */
+const TAU=Math.PI*2;
+const SP_TURNS=4.4, SP_BANDS=1.45, SP_SEG=170, SP_DOM=52;
+
+/* ============================================================
+   BOLUMLER
+     #  tas    -> portal TUTMAZ
+     =  bulut  -> portal TUTAR
+     G  prizma kapisi -> dugme basiliyken acilir
+     B  basinc dugmesi
+     C  bulut kupu
+     |  prizma perdesi -> gecen portallari soker, kupu eve yollar
+     ^  diken
+     S  baslangic   E  cikis
+   ============================================================ */
+const LEVELS=[
+['##########################','#........................#','#................========#','#........................#','#........................#','#........................#','#........................#','#........................#','#........................#','#.S..................E...#','#======#^^^^^^^^^^########','########^^^^^^^^^^########','########^^^^^^^^^^########','########^^^^^^^^^^########'],
+['##########################','#........................#','#........................#','#........................#','#........................#','#........................#','#........................#','#........................=','=........................=','=.S...................E..=','######^^^^^^^^^^^^^#######','######^^^^^^^^^^^^^#######','######^^^^^^^^^^^^^#######','##########################'],
+['##########################','#..===...................#','#........................#','#........................#','#........................#','#........................#','#....E...................#','##########...............#','##########...............#','##########...............#','##########...............#','##########.......S.......#','###############====#######','##########################'],
+['##########################','=........................#','=........................#','=........................#','=S.......................#','###......................#','#........................#','#........................#','#...............E........#','#..............######....#','#........................#','#........................#','#========================#','##########################'],
+['##########################','#.....====...............#','#........................#','#........................#','#....................E...#','#.................######.#','#........................#','#........................#','#####.####......====.....#','#####.####......####.....#','#####.####......####.....#','#...........S...####.....#','#========================#','##########################'],
+['##########################','#...................G....#','#................===G#####','#...................G....#','#...................G....#','#...................G....#','#...................G....#','#...................G....#','#...................G....#','#.SC.............BBBG..E.#','#=====#^^^^^^^^^##########','#######^^^^^^^^^##########','#######^^^^^^^^^##########','#######^^^^^^^^^##########'],
+['##########################','#.................===....#','#............|...........#','#............|...........#','#............|...........#','#............|.....E.....#','#............|..######...#','#............|...........#','#............|...........#','#............|...........#','#............|...........#','#.S..........|...........#','#===========##############','##########################'],
+['##########################','=..................G.....#','=SC................G.....#','###................G.....#','=..................G.....#','=..................G.....#','=..................G.....#','=..................G.....#','#..............BBB.G.....#','#.............#####G.....#','#..................G....E#','#=======^^^^^^^==========#','########^^^^^^^###########','##########################'],
+['##=====###################','#........................#','#........................#','#........................#','#........................#','#........................#','#........................#','#.....####################','#.............EK##########','#.S...==========##########','######^^^^^^^^^^##########','######^^^^^^^^^^##########','######^^^^^^^^^^##########','##########################'],
+['#############=############','#...................#....#','#.S.A...............#....#','#.##=...............#....#','#...................#....#','#...................#....#','#...................#....#','#...................G....#','#...................G....#','#...................G.E..#','#############K############','#############B############','##########################','##########################'],
+['####################=#####','#...............#........#','#........................=','#........................=','#........................=','#........................#','#...............#........#','#...............#........#','#...............#........#','#...............#........#','#...............#........#','#.E.............#...S....#','#######^^^^^^^^^####=#####','##########################'],
+['##########################','#........................#','#........................#','#........................#','#........................#','#........................#','=........................R','#........................#','#........................#','L........................=','#....G...................#','#.E..G..........S........#','##########################','##########################'],
+['#################=########','#........................#','#........................#','#........................#','#........................#','=...........K....E.......#','#...........######.......#','#........................#','#........................#','L........................=','#........................#','#.S......................#','#========================#','##########################'],
+['#######################=##','#........................#','#........................#','#........................#','#........................#','#........................#','#........................#','#........................#','#........................#','=........................L','#...................G....#','#.S.................G.E..#','#######################R##','##########################'],
+['##################=#######','#............|...........#','#............|...........#','#............|...........#','#............|...........#','#............|...........#','#............|...........#','#............|...........#','#............|...........#','#............|...........#','#............|........G..#','#.S..C.......|....B...G.E#','#===========##############','##########################'],
+['##########################','#.S......................#','###......................#','###...#..................=','###...#..................#','###...#..................#','###...#..................#','###...#..................=','###...#..................#','###...#..................#','###...#...#..............#','###...#...#E##...........#','###===#^^^###^^^^^^^^^^^^#','##########################'],
+['##########################','#........................#','#........................#','#........................#','#........................#','#........................#','#........................#','#........................#','#........................#','#........................#','#........................#','#.S.C................E...L','##########################','##########################'],
+['##########################','#........................#','#........................#','#........................#','#........................#','=........................R','#........................#','#........................#','#............G...........#','L............G...........=','#............G...........#','#.S..B.......G........E..#','##########################','##########################'],
+['##########################','#........................#','#........................#','=........................R','#...................G....#','#.S.................G.E..#','#^########################','#^########################','#^########################','#^########################','=^.......................L','#^########################','##########################','##########################'],
+['####################=#####','#........................#','#.S.A....................#','#.##=....................#','#........................#','#........................#','#........................#','#........................#','#........................#','#........................#','#.....#..................#','#.....#............E.....L','##########################','##########################'],
+['##########################','#........................#','#..A.....................#','#..===...................#','#........................#','#...........==========...#','#........................#','#...................G....#','#.S.........K...BBB.G.E..#','#=====....===============#','#........................#','#^^^^^^^^^^^^^^^^^^^^^^^^#','#^^^^^^^^^^^^^^^^^^^^^^^^#','#^^^^^^^^^^^^^^^^^^^^^^^^#'],
+];
+
+/* ---------- durum ---------- */
+let map, level=0, exitX=0, exitY=0, done=0, tick=0;
+let radPhase=0, spinPhase=0, gateOn=false, lasers=[], lz=[], rOn=0;
+/* ISIK: atin siluet halesi. GB=0 -> hale tamamen kapali, sifir maliyet.
+   shadowBlur CTM'den ETKILENMEZ (cihaz pikselinde olculur), bu yuzden
+   resize() icinde scale ile carpiliyor; yoksa buyuk ekranda ince cizgiye,
+   kucuk pencerede koca bulamaca doner. Olculdu: 1x'te 15px, 3x'te 5px. */
+const GB0=10; let GB=GB0;
+const P={x:0,y:0,vx:0,vy:0,w:17,h:20,ground:false,face:1,run:0,tp:0,coy:0,buf:0};
+const portals=[null,null];
+/* ---------- SES: ZzFXMicro v1.3.2 (Frank Force, MIT) ---------- */
+'use strict';
+let // ZzFXMicro - Zuper Zmall Zound Zynth - v1.3.2 by Frank Force
+zzfxV=.225,             // volume — v38: tumu %75'e indirildi
+zzfxX=new AudioContext, // audio context
+zzfx=                   // play sound
+(p=1,k=.05,b=220,e=0,r=0,t=.1,q=0,D=1,u=0,y=0,v=0,z=0,l=0,E=0,A=0,F=0,c=0,w=1,m=0,B=0
+,N=0)=>{let M=Math,d=2*M.PI,R=44100,G=u*=500*d/R/R,C=b*=(1-k+2*k*M.random(k=[]))*d/R,
+g=0,H=0,a=0,n=1,I=0,J=0,f=0,h=N<0?-1:1,x=d*h*N*2/R,L=M.cos(x),Z=M.sin,K=Z(x)/4,O=1+K,
+X=-2*L/O,Y=(1-K)/O,P=(1+h*L)/2/O,Q=-(h+L)/O,S=P,T=0,U=0,V=0,W=0;e=R*e+9;m*=R;r*=R;t*=
+R;c*=R;y*=500*d/R**3;A*=d/R;v*=d/R;z*=R;l=R*l|0;p*=zzfxV;for(h=e+m+r+t+c|0;a<h;k[a++]
+=f*p)++J%(100*F|0)||(f=q?1<q?2<q?3<q?4<q?(g/d%1<D/2)*2-1:Z(g**3):M.max(M.min(M.tan(g)
+,1),-1):1-(2*g/d%2+2)%2:1-4*M.abs(M.round(g/d)-g/d):Z(g),f=(l?1-B+B*Z(d*a/l):1)*(4<q?
+f:(f<0?-1:1)*M.abs(f)**D)*(a<e?a/e:a<e+m?1-(a-e)/m*(1-w):a<e+m+r?w:a<h-c?(h-a-c)/t*w:
+0),f=c?f/2+(c>a?0:(a<h-c?1:(h-a)/c)*k[a-c|0]/2/p):f,N?f=W=S*T+Q*(T=U)+P*(U=f)-Y*V-X*(
+V=W):0),x=(b+=u+=y)*M.cos(A*H++),g+=x+x*E*Z(a**5),n&&++n>z&&(b+=v,C+=v,n=0),!l||++I%l
+||(b=C,u=G,n=n||1);X=zzfxX,p=X.createBuffer(1,h,R);p.getChannelData(0).set(k);b=X.
+createBufferSource();b.buffer=p;b.connect(X.destination);b.start()}
+const SFX={
+ nal1:[0.3,0.05,150,0,0.01,0.03,2,2,-60,0,0,0,0,0.3],
+ nal2:[0.3,0.05,185,0,0.01,0.03,2,2,-60,0,0,0,0,0.3],
+ zipla:[0.5,0.05,330,0.02,0.06,0.14,1,2,90],
+ inis:[0.45,0.08,140,0.01,0.02,0.1,4,1.5,-40,0,0,0,0,0.3],
+ pAc:[0.6,0.05,520,0.02,0.09,0.2,1,1.6,180,0,0,0,0,0,3,0,0,0.3],
+ pKop:[0.55,0.1,340,0.01,0.05,0.18,3,2,-260],
+ isin:[0.5,0.05,700,0.03,0.09,0.18,2,1.4,-320,0,0,0,0,0,4,0,0.05,0.3],
+ al:[0.35,0.05,420,0.01,0.02,0.06,1,1,60],
+ birak:[0.35,0.05,260,0.01,0.02,0.06,1,1,-50],
+ ors:[0.8,0.02,360,0,0.01,0.42,3,2,0,0,137,0.02,0.06,0,0,0,0,0.22],
+ ezil:[0.6,0.15,200,0.02,0.1,0.24,4,1.8,-90,0,0,0,0,0.6,3,0,0.05,0.3],
+ dugme:[0.35,0.05,640,0.01,0.01,0.05,1],
+ kapi:[0.45,0.05,300,0.05,0.14,0.22,1,1.2,140,0,0,0,0,0,3,0,0.05,0.3],
+ simsek:[0.8,0.2,1100,0,0.05,0.34,2,2,-900,0,0,0,0.03,0.5,0,0,0.1,0.2,0,0,-700],
+ olum:[0.55,0.1,240,0.03,0.14,0.3,3,1.6,-160,0,0,0,0,0.2],
+ gok:[1.2,0.3,42,0.05,0.7,2,4,1,-6,0,0,0,0,0.6,0,0,0.25,0.5,0.5,0,-180],
+ b1:[0.5,0.05,523,0.02,0.1,0.22,1,1.4,0,0,0,0,0,0,2,0,0.05,0.3],
+ b2:[0.5,0.05,659,0.02,0.1,0.22,1,1.4,0,0,0,0,0,0,2,0,0.05,0.3],
+ b3:[0.5,0.05,784,0.03,0.16,0.32,1,1.4,0,0,0,0,0,0,2,0,0.08,0.35]
+};
+let muted=0, lastStep=0;
+function sfx(n,v,f){
+  if(muted)return;
+  const a=SFX[n]; if(!a)return;
+  const q=a.slice();
+  if(v!=null)q[0]=(q[0]||1)*v;
+  if(f!=null)q[2]=(q[2]||220)*f;
+  try{zzfx(...q);}catch(e){}
+}
+/* ---------- ortam sesi: yagmur + gok gurultusu ---------- */
+/*--CUT:MUZIK-- 8 sn dikissiz yagmur yatagi + rastgele gok gurultusu.
+   YAGMUR: LCG gurultusu -> tek kutuplu alcak geciren -> yuksek geciren
+   (ugultu degil cizirti olsun), uzerine 600 damla transienti. Dongu
+   dikisi duyulmaz: yuksek geciren DC birakmiyor, filtre zaman sabiti
+   ~2 ornek, gurultunun kendisi zaten desensiz. Olcum arac/ses-dogrula.js.
+   GOK: tek ZzFX tablosu girdisi ('gok'). Mesafe hissi ikinci bir girdiyle
+   degil, sfx(ad,hacim,frekans) sarmalayicisiyla uretiliyor: her calis
+   farkli hacim ve perdede. ('simsek' girdisi denendi, -700 alcak gecireni
+   yuzunden gok yaninda 20 dB altta kaliyor, duyulmuyor — hala bagli degil.)
+   Kaldirmak: kesim-senaryolari.js MUZIK etiketi. --*/
+let MB=0,MG=0;
+function music(){
+  if(MB)return;MB=1;
+  const N=352800,B=zzfxX.createBuffer(1,N,44100),d=B.getChannelData(0);
+  let z=7,lp=0,pr=0;
+  const R=()=>(z=z*16807%2147483647)/2147483647-.5;
+  for(let i=0;i<N;i++){
+    lp+=(R()-lp)*.35;                     // alcak geciren: tizi yumusat
+    d[i]=lp-pr*.72; pr=lp;                // yuksek geciren: ugultuyu at
+  }
+  for(let j=0;j<600;j++){                 // tek tek damla transientleri
+    const t=(R()+.5)*N|0, f=(900+(R()+.5)*2400)/44100,
+          L=90+(R()+.5)*260, v=(R()+.5)*.35;
+    for(let i=0;i<L;i++)d[(t+i)%N]+=Math.sin(f*i*TAU)*v*(1-i/L)**6;
+  }
+  let p=0;for(let i=0;i<N;i++)p=Math.max(p,Math.abs(d[i]));
+  for(let i=0;i<N;i++)d[i]*=.064/p;   // v38: %75
+  MG=zzfxX.createGain();MG.gain.value=muted?0:1;MG.connect(zzfxX.destination);
+  const s=zzfxX.createBufferSource();s.buffer=B;s.loop=true;s.connect(MG);s.start();
+}
+function gok(){    /* rastgele gok. Aralik = 1/olasilik kare.
+     9e-4 -> 1111 kare = 18.5 sn (olculdu: 10 sn'de 1 tanesi bile cok geldi).
+     1.4e-4 -> 7143 kare = 119 sn, yani ~2 dakikada bir. */
+  if(Math.random()<1.4e-4)sfx('gok',.45+Math.random(),.6+Math.random()*.5);
+}
+/*--/CUT--*/
+const PAINT=[['#2f6be0','#4f9dff','#9ad6ff'],['#e8431f','#ff8034','#ffc95c']];
+let cubes=[], carried=null, foes=[], shake=0;
+let beams=[],puffs=[],trail=[],sparks=[],rings=[],zaps=[],glitter=[];
+let hornT=0,tailT=0,mx=0,my=0,jumpPrev=false,ePrev=false;
+const keys={};
+
+const clamp=(v,a,b)=>v<a?a:v>b?b:v;
+const sgn=v=>v<0?-1:v>0?1:0;
+const hit=(a,b)=>a.x<b.x+b.w&&a.x+a.w>b.x&&a.y<b.y+b.h&&a.y+a.h>b.y;
+function rot(x,y,a){const c=Math.cos(a),s=Math.sin(a);return [x*c-y*s,x*s+y*c];}
+
+function cellAt(cx,cy){
+  if(cy>=ROWS)return '.';
+  if(cx<0||cy<0||cx>=COLS)return '#';
+  return map[cy][cx];
+}
+const isSolid=(cx,cy)=>{
+  const c=cellAt(cx,cy);
+  return c==='#'||c==='='||c==='L'||c==='R'||(c==='G'&&!gateOn);
+};
+
+function load(n){
+  level=((n%LEVELS.length)+LEVELS.length)%LEVELS.length;
+  map=LEVELS[level].map(r=>r.split(''));
+  portals[0]=portals[1]=null;
+  beams=[];puffs=[];trail=[];sparks=[];rings=[];zaps=[];glitter=[];
+  cubes=[];carried=null;foes=[];shake=0;done=0;flow=0;gateOn=false;lasers=[];
+  for(let y=0;y<ROWS;y++)for(let x=0;x<COLS;x++){
+    const ch=map[y][x];
+    if(ch==='S'){P.x=x*T+(T-P.w)/2;P.y=y*T+(T-P.h);map[y][x]='.';}
+    if(ch==='E'){exitX=x*T+T/2;exitY=y*T+T;map[y][x]='.';}
+    if(ch==='C'||ch==='A'){
+      const hv=ch==='A', W2=hv?17:13, H2=hv?14:13;
+      const c={x:x*T+(T-W2)/2,y:y*T+T-H2,vx:0,vy:0,w:W2,h:H2,ground:false,tp:0,hv};
+      c.hx=c.x;c.hy=c.y;cubes.push(c);map[y][x]='.';
+    }
+    /* L: lazer yayici. Duvara gomulu durur, ilk ACIK komsusuna dogru atar
+       (sag, sol, asagi, yukari sirasiyla) — yon icin ayri harf gerekmez. */
+    if(ch==='L'){const d=[[1,0],[-1,0],[0,1],[0,-1]].find(([a,b])=>!isSolid(x+a,y+b))||[1,0];
+      lasers.push({x:x*T+T/2+d[0]*13,y:y*T+T/2+d[1]*13,dx:d[0],dy:d[1]});}
+    if(ch==='K'){
+      foes.push({x:x*T+5,y:y*T+T-16,vx:0.55,w:14,h:16,ph:Math.random()*9});
+      map[y][x]='.';
+    }
+  }
+  P.vx=P.vy=0;P.face=1;P.run=0;P.tp=0;P.coy=0;P.buf=0;
+  air=0;sq=0;idle=0;rear=0;
+}
+
+/* ---------- nisan alma ---------- */
+/* --- YALDIZ: dort koseli parilti. %38 altin, gerisi tam spektrum --- */
+function glit(x,y,n,up){
+  for(let i=0;i<n;i++){
+    const gold=Math.random()<0.38;
+    glitter.push({x:x+(Math.random()-.5)*13, y:y+(Math.random()-.5)*5,
+      vx:(Math.random()-.5)*2.4, vy:-Math.random()*1.9-(up||0),
+      life:1, dec:0.020+Math.random()*0.016,
+      h:gold?42+Math.random()*14:Math.random()*360,
+      l:gold?74:66, s:gold?100:95,
+      r:Math.random()*TAU, sp:(Math.random()-.5)*0.24,
+      k:1.7+Math.random()*2.6});
+  }
+}
+function castStraight(ox,oy,tx,ty){
+  const dx=tx-ox,dy=ty-oy,L=Math.hypot(dx,dy)||1;
+  const sx=dx/L,sy=dy/L;
+  let px=ox,py=oy,lx=Math.floor(px/T),ly=Math.floor(py/T);
+  for(let i=0;i<700;i++){
+    px+=sx*2;py+=sy*2;
+    if(py>H+40)break;
+    const cx=Math.floor(px/T),cy=Math.floor(py/T);
+    if(cx===lx&&cy===ly)continue;
+    if(isSolid(cx,cy)){
+      let nx=lx-cx,ny=ly-cy;
+      if(nx&&ny){
+        if(!isSolid(cx+nx,cy))ny=0;
+        else if(!isSolid(cx,cy+ny))nx=0;
+        else ny=0;
+      }
+      return {cx,cy,nx,ny,hx:px,hy:py,cell:cellAt(cx,cy)};
+    }
+    lx=cx;ly=cy;
+  }
+  return null;
+}
+/* portali sok: perdenin kullandigi zap efektiyle ayni gorsel dil */
+function kill(w){
+  const p=portals[w]; if(!p)return;
+  zaps.push({x:p.px,y:p.py,life:1}); sfx('pKop');
+  portals[w]=null;
+}
+function fire(which){
+  idle=rear=0;   /*--CUT:IDLE-- saha kalkmayi kes: cizim donuk, hornTip degil --*/
+  const o=which===0?hornTip():tailTip(), d=limbDir(which);
+  const h=castStraight(o.x,o.y,o.x+d.x*2000,o.y+d.y*2000), warm=which===1;
+  const end=h?{x:h.hx,y:h.hy}:{x:o.x+d.x*900,y:o.y+d.y*900};
+  beams.push({x0:o.x,y0:o.y,x1:end.x,y1:end.y,life:1,warm,seed:Math.random()*9});
+  if(which===0)hornT=1;else tailT=1;
+  // --- GECERSIZ ATIS: o uzvun portali kopar, tunel dagilir ---
+  if(!h){kill(which);return;}
+  const ok=h.cell==='='&&(h.nx||h.ny)&&!isSolid(h.cx+h.nx,h.cy+h.ny);
+  if(!ok){for(let i=0;i<8;i++)puffs.push({x:h.hx,y:h.hy,vx:(Math.random()-.5)*1.7,vy:(Math.random()-.5)*1.7,life:1});
+    rings.push({x:h.hx,y:h.hy,life:1,warm,gray:1});kill(which);return;}
+  // UST USTE YASAK, YAN YANA SERBEST.
+  // Karo tabanli kontrol yetmiyor: kosegen karolarda dik yuzler
+  // 17px'e kadar yaklasip cakisabiliyor. Mesafe tek kuralla hepsini kapatir.
+  //   ayni karo 0-17px yasak · yan yana 24px serbest · esik 20.4px
+  const px=h.cx*T+T/2+h.nx*T/2, py=h.cy*T+T/2+h.ny*T/2, ot=portals[1-which];
+  if(ot&&Math.hypot(ot.px-px,ot.py-py)<T*0.85){kill(which);return;}
+  portals[which]={cx:h.cx,cy:h.cy,nx:h.nx,ny:h.ny,px,py,born:tick,warm};
+  rings.push({x:portals[which].px,y:portals[which].py,life:1,warm,gray:0});
+  glit(portals[which].px,portals[which].py,10,0);
+  sfx('pAc',1,warm?0.82:1);
+  for(let i=0;i<12;i++)sparks.push({x:portals[which].px,y:portals[which].py,
+    vx:(Math.random()-.5)*3.4,vy:(Math.random()-.5)*3.4,life:1,warm});
+}
+
+function puff(x,y){for(let i=0;i<8;i++)puffs.push({x,y,
+  vx:(Math.random()-.5)*1.7,vy:(Math.random()-.5)*1.7,life:1});}
+
+/* ---------- genel govde fizigi ---------- */
+function passable(cx,cy,ccx,ccy){
+  if(!portals[0]||!portals[1])return false;
+  for(const p of portals){
+    /* GIRIS PAYI: kutu 17 px, karo 24. Sadece portal hucresi gecilebilir olunca
+       kutunun komsuya 1 px tasmasi bile dusmeyi engelliyordu; etkin pencere 7 px'ti
+       (olculdu). Simdi portalin YUZEY BOYUNCA komsulari da gecilebilir — ama yalniz
+       govde merkezi portalla hizaliyken (|t|<12). Duvar portali icin ayni kural
+       sutun boyunca. embedded() ayni fonksiyonu kullandigi icin tutarli. */
+    const dc=p.ny?cx-p.cx:cy-p.cy, dr=p.ny?cy-p.cy:cx-p.cx;
+    if(dr||Math.abs(dc)>1)continue;
+    if(Math.abs(-(ccx-p.px)*p.ny+(ccy-p.py)*p.nx)<T*0.5)return true;
+  }
+  return false;
+}
+function embedded(o){
+  const ccx=o.x+o.w/2,ccy=o.y+o.h/2;
+  const x0=Math.floor(o.x/T),x1=Math.floor((o.x+o.w-1)/T);
+  const y0=Math.floor(o.y/T),y1=Math.floor((o.y+o.h-1)/T);
+  for(let cy=y0;cy<=y1;cy++)for(let cx=x0;cx<=x1;cx++)
+    if(isSolid(cx,cy)&&!passable(cx,cy,ccx,ccy))return true;
+  return false;
+}
+function bodyMove(o,dx,dy){
+  o.x+=dx;o.y+=dy;
+  const ccx=o.x+o.w/2,ccy=o.y+o.h/2;
+  const x0=Math.floor(o.x/T),x1=Math.floor((o.x+o.w-1)/T);
+  const y0=Math.floor(o.y/T),y1=Math.floor((o.y+o.h-1)/T);
+  for(let cy=y0;cy<=y1;cy++)for(let cx=x0;cx<=x1;cx++){
+    if(!isSolid(cx,cy))continue;
+    if(passable(cx,cy,ccx,ccy))continue;
+    if(dx>0){o.x=cx*T-o.w;o.vx=0;}
+    if(dx<0){o.x=cx*T+T;o.vx=0;}
+    if(dy>0){o.y=cy*T-o.h;o.vy=0;o.ground=true;}
+    if(dy<0){o.y=cy*T+T;o.vy=0;}
+  }
+}
+// kutulara carpma (oyuncu kutunun ustune basabilsin)
+function vsCubes(o,dx,dy){
+  for(const c of cubes){
+    if(c===carried||c===o)continue;
+    if(!hit(o,c))continue;
+    if(dx>0){o.x=c.x-o.w;o.vx=0;}
+    if(dx<0){o.x=c.x+c.w;o.vx=0;}
+    if(dy>0){o.y=c.y-o.h;o.vy=0;o.ground=true;}
+    if(dy<0){o.y=c.y+c.h;o.vy=0;}
+  }
+}
+function bodyTeleport(o){
+  if(!portals[0]||!portals[1]||o.tp>0)return;
+  const cx=o.x+o.w/2,cy=o.y+o.h/2;
+  for(let i=0;i<2;i++){
+    const a=portals[i],b=portals[1-i];
+    const rx=cx-a.px,ry=cy-a.py;
+    const d=rx*a.nx+ry*a.ny, t=-rx*a.ny+ry*a.nx;
+    if(d>=0||d<-T||Math.abs(t)>T*0.55)continue;
+    const ang=Math.atan2(b.ny,b.nx)-Math.atan2(-a.ny,-a.nx);
+    const [rrx,rry]=rot(rx,ry,ang);
+    let [nvx,nvy]=rot(o.vx,o.vy,ang);
+    const along=nvx*b.nx+nvy*b.ny;
+    if(along<PUSH){nvx+=b.nx*(PUSH-along);nvy+=b.ny*(PUSH-along);}
+    o.x=b.px+rrx+b.nx*(o.w*0.7+3)-o.w/2;
+    o.y=b.py+rry+b.ny*(o.h*0.5+3)-o.h/2;
+    o.vx=nvx*BOOST;o.vy=nvy*BOOST;
+    // Tegetsel kayma (rrx,rry) momentumu korumak icin tasiniyor ama cikisi
+    // geometrinin icine sokabiliyor. Once onu birak, sonra kurtarmaya calis.
+    // Kurtarma dongusu normal boyunca itiyor; sikisik girerse oyuncuyu
+    // haritanin DISINA itip kilitliyordu (olculdu: gecislerin %4.6'si).
+    if(embedded(o)){o.x-=rrx;o.y-=rry;}
+    for(let k=0;k<12&&embedded(o);k++){o.x+=b.nx*2;o.y+=b.ny*2;}
+    const sp=Math.hypot(o.vx,o.vy);
+    if(sp>MAXV){o.vx*=MAXV/sp;o.vy*=MAXV/sp;}
+    o.ground=false;o.tp=7;o.fl=1;   // fl: firlatildi -> ziplama kesigi uygulanmaz
+    rings.push({x:b.px,y:b.py,life:1,warm:b.warm,gray:0});
+    for(let k=0;k<12;k++)sparks.push({x:b.px,y:b.py,
+      vx:b.nx*2.4+(Math.random()-.5)*2.6,vy:b.ny*2.4+(Math.random()-.5)*2.6,
+      life:1,warm:b.warm});
+    return;
+  }
+}
+
+/* ---------- tile bazli varlik kutulari ---------- */
+function tileRects(ch,shrink){
+  const r=[];
+  for(let y=0;y<ROWS;y++)for(let x=0;x<COLS;x++)
+    if(map[y][x]===ch)r.push(shrink(x,y));
+  return r;
+}
+const btnBox=(x,y)=>({x:x*T,y:y*T+T-8,w:T,h:8,cx:x,cy:y});
+const inkBox=(x,y)=>({x:x*T+1,y:y*T+4,w:T-2,h:T-4});
+const fizzBox=(x,y)=>({x:x*T+5,y:y*T,w:T-10,h:T});
+
+/* ============================================================
+   GUNCELLEME
+   ============================================================ */
+function update(){
+  tick++;
+  gok();                                   /*--CUT:MUZIK: gok tetigi --*/
+  if(P.tp>0)P.tp--;
+
+  aimStep();
+  /*--CUT:JUMP-- havadalik ve inis ezilmesi --*/
+  air+=((P.ground?0:1)-air)*0.45; sq*=0.87;
+  /*--/CUT--*/
+  radPhase+=0.014;
+  spinPhase+=0.0022;
+
+  /* --- dugmeler / kapi ---
+     Ses DURUM DEGISIMINDE calar, basili oldugu surece DEGIL. Eskiden
+     gateOn her kare sifirlanip yeniden kuruldugu icin "yeni basildi"
+     testi her karede dogru cikiyor, sfx 60 Hz taranıyordu. Olctuk:
+     arac/ses-sikligi.js. Kapanista ayni ornek 0.62 frekansla, yani
+     daha pes calinir — ikinci bir tablo girdisine gerek yok. */
+  const wasOn=gateOn; gateOn=false;
+  for(const b of tileRects('B',btnBox)){
+    if(hit(P,b)){gateOn=true;continue;}
+    for(const c of cubes) if(c!==carried&&hit(c,b)){gateOn=true;break;}
+  }
+  /* --- LAZER: yayicidan cikar, ilk katiya kadar gider. Vurdugu yuz bir
+     PORTALSA oteki portaldan, onun normali yonunde devam eder (<=3 hop;
+     A->B->A dongusu icin ust sinir). R'ye varirsa kapi acilir. Oyuncuya
+     degerse olum, karartıya degerse zap. Kupler engellemez (ucuz). --- */
+  /* MANDAL: isin kapiyi GECEN KAREKI haliyle gorur. Yoksa R'nin actigi kapidan
+     gecen isin, kapi her karede sifirlandigi icin kendi kendini soner. Boylece
+     R bir kez yaninca tutar; dugme sadece ilk gecisi acmak icin gerekir. */
+  const g0=gateOn;gateOn=g0||wasOn;lz=[];rOn=0;
+  for(const e of lasers){
+    let x=e.x,y=e.y,dx=e.dx,dy=e.dy;
+    for(let k=0;k<3;k++){
+      const h=castStraight(x,y,x+dx*2000,y+dy*2000);if(!h)break;
+      // KUP ISINI KESER (tasinan dahil -> kalkan). Isina bakan kenar, en yakini kazanir.
+      let ex=h.hx,ey=h.hy,bk=0;
+      for(const c of cubes){
+        const nx=dx>0?c.x:c.x+c.w, ny=dy>0?c.y:c.y+c.h;
+        if(dx&&y>c.y&&y<c.y+c.h&&(nx-x)*dx>0&&(nx-ex)*dx<0){ex=nx;bk=1;}
+        if(dy&&x>c.x&&x<c.x+c.w&&(ny-y)*dy>0&&(ny-ey)*dy<0){ey=ny;bk=1;}
+      }
+      lz.push([x,y,ex,ey]);
+      if(bk)break;
+      if(h.cell==='R'){rOn=1;break;}
+      const i=portals.findIndex(p=>p&&p.cx===h.cx&&p.cy===h.cy&&p.nx===h.nx&&p.ny===h.ny);
+      if(i<0||!portals[1-i])break;
+      const q=portals[1-i];x=q.px+q.nx*2;y=q.py+q.ny*2;dx=q.nx;dy=q.ny;
+    }
+  }
+  gateOn=g0||!!rOn;
+  for(const [a,b,c,d] of lz){
+    const r={x:Math.min(a,c)-2,y:Math.min(b,d)-2,w:Math.abs(c-a)+4,h:Math.abs(d-b)+4};
+    if(hit(P,r)){sfx('olum');load(level);return;}
+    for(let i=foes.length-1;i>=0;i--)if(hit(foes[i],r)){
+      zap(foes[i].x+7,foes[i].y+8);sfx('inis',.7,.45);foes.splice(i,1);}
+  }
+  if(gateOn!==wasOn)sfx('kapi',1,gateOn?1:.62);
+
+  /* --- girdi --- */
+  const left=keys.a||keys.arrowleft, right=keys.d||keys.arrowright;
+  const jump=keys.w||keys[' ']||keys.arrowup, grab=keys.e;
+  const dir=(right?1:0)-(left?1:0);
+
+  if(grab&&!ePrev){
+    if(carried){                         // birak: oyuncunun hizini devral
+      carried.vx=P.vx;carried.vy=P.vy;
+      carried.tp=4;carried=null;
+    }else{
+      let best=null,bd=1e9;
+      for(const c of cubes){
+        if(c.hv)continue;                 // ors agir, tasinamaz
+        const d=Math.hypot(c.x+c.w/2-(P.x+P.w/2),c.y+c.h/2-(P.y+P.h/2));
+        if(d<34&&d<bd){bd=d;best=c;}
+      }
+      if(best){carried=best;best.vx=best.vy=0;}
+    }
+  }
+  ePrev=grab;
+
+  if(dir){
+    P.face=dir;
+    const acc=P.ground?ACC_G:ACC_A, cap=P.ground?RUN:AIRCAP;
+    if(dir*P.vx<cap)P.vx=dir*Math.min(cap,dir*P.vx+acc);
+    if(dir*P.vx<0)P.vx+=dir*acc;
+  }else{
+    const st=P.ground?STOP_G:STOP_A;
+    P.vx=Math.abs(P.vx)<=st?0:P.vx-sgn(P.vx)*st;
+  }
+  if(P.ground&&Math.abs(P.vx)>RUN)P.vx*=DRAG_G;
+
+  if(P.ground)P.coy=COYOTE;else if(P.coy>0)P.coy--;
+  if(jump&&!jumpPrev)P.buf=BUFFER;else if(P.buf>0)P.buf--;
+  if(P.buf>0&&P.coy>0){P.vy=-JUMP;P.coy=0;P.buf=0;P.ground=false;
+    glit(P.x+P.w/2,P.y+P.h,14,0.8);sfx('zipla');}
+  /* Ziplama kesigi SADECE ziplamaya. Portaldan yukari firlayan oyuncuya
+     uygulaninca dikey momentum -2'ye kirpiliyordu (olculdu: 8.8 girdi,
+     -1.2 cikti). Bayrak tepe noktasinda duser. */
+  if(!jump&&P.vy<-2&&!P.fl)P.vy=-2;
+  if(P.vy>=0)P.fl=0;
+  jumpPrev=jump;
+
+  P.vy=clamp(P.vy+GRAV,-MAXV,MAXV);
+  const fallV=P.vy, wasAir=!P.ground;
+  P.ground=false;
+  bodyMove(P,P.vx,0);vsCubes(P,P.vx,0);
+  bodyMove(P,0,P.vy);vsCubes(P,0,P.vy);
+  const wasTp=P.tp;
+  bodyTeleport(P);
+  if(P.tp>wasTp)sfx('isin');
+  if(P.ground&&wasAir&&fallV>3.4){
+    glit(P.x+P.w/2,P.y+P.h,Math.min(16,fallV*2|0),0.2);
+    sfx('inis',Math.min(1,fallV/7));
+    /*--CUT:JUMP-- inis ezilmesi --*/
+    sq=Math.min(1,fallV/9);
+    /*--/CUT--*/
+  }
+
+  /* --- kupler --- */
+  for(const c of cubes){
+    if(c.tp>0)c.tp--;
+    if(c===carried){                     // tasinirken boynuzun onunde durur
+      c.x=P.x+P.w/2+P.face*15-c.w/2;
+      c.y=P.y-4;
+      c.vx=P.vx;c.vy=P.vy;
+      continue;
+    }
+    const pvy=c.vy;
+    c.vy=clamp(c.vy+GRAV,-MAXV,MAXV);
+    if(c.ground)c.vx*=0.86;
+    c.ground=false;
+    bodyMove(c,c.vx,0);
+    bodyMove(c,0,c.vy);
+    if(c.hv&&c.ground&&pvy>4){
+      shake=Math.min(6,pvy*0.55); sfx('ors',Math.min(1,pvy/8));
+      for(let k=0;k<8;k++)puffs.push({x:c.x+c.w/2+(Math.random()-.5)*14,
+        y:c.y+c.h,vx:(Math.random()-.5)*2,vy:-Math.random()*1.4,life:1});
+    }
+    bodyTeleport(c);
+    if(c.y>H+80||cellAt((c.x+c.w/2)/T|0,(c.y+c.h/2)/T|0)==='^'){
+      if(c===carried)carried=null;
+      zap(c.x+c.w/2,c.y+c.h/2);sfx('inis',.7,.45);
+      c.x=c.hx;c.y=c.hy;c.vx=c.vy=0;c.tp=6;}
+  }
+
+  /* --- prizma perdesi --- */
+  for(const f of tileRects('|',fizzBox)){
+    if(hit(P,f)&&(portals[0]||portals[1])){
+      for(const p of portals) if(p) zap(p.px,p.py);
+      portals[0]=portals[1]=null;
+    }
+    for(const c of cubes){
+      if(hit(c,f)){
+        zap(c.x+c.w/2,c.y+c.h/2);
+        if(c===carried)carried=null;
+        c.x=c.hx;c.y=c.hy;c.vx=c.vy=0;c.tp=6;
+      }
+    }
+  }
+
+  /* --- dikenler --- */
+  /* --- karartilar: devriye + yercekimi. Portallar onlari TASIMAZ
+     (renksizler); actigin delikten dusup bosluga giderler.
+     Olumleri: ustlerine agir cisim dusmesi ya da ucurum. --- */
+  for(let i=foes.length-1;i>=0;i--){
+    const f=foes[i];
+    f.ph+=0.09;
+    const ahead=f.x+f.w/2+Math.sign(f.vx)*(f.w/2+3);
+    const cxA=Math.floor(ahead/T), cyW=Math.floor((f.y+f.h/2)/T),
+          cyF=Math.floor((f.y+f.h+3)/T);
+    if(isSolid(cxA,cyW)||!isSolid(cxA,cyF)) f.vx*=-1;
+    f.vy=clamp((f.vy||0)+GRAV,-MAXV,MAXV);
+    f.ground=false;
+    bodyMove(f,f.vx,0); bodyMove(f,0,f.vy);
+    // murekkep: renksiz, renksizlige karisir — kup gibi batar (tutarli fizik)
+    if(f.y>H+60||cellAt((f.x+f.w/2)/T|0,(f.y+f.h/2)/T|0)==='^'){
+      zap(f.x+f.w/2,f.y+f.h/2);sfx('inis',.7,.45);foes.splice(i,1);continue;}
+    let dead=false;
+    for(const c of cubes){
+      if(c.hv&&c.vy>2.2&&hit(c,f)){
+        sfx('ezil');
+        glit(f.x+f.w/2,f.y+f.h/2,18,1.2);        // golge kirilinca renk sacilir
+        for(let k=0;k<10;k++)puffs.push({x:f.x+f.w/2,y:f.y+f.h/2,
+          vx:(Math.random()-.5)*2.4,vy:-Math.random()*2,life:1});
+        shake=5; foes.splice(i,1); dead=true; break;
+      }
+    }
+    if(!dead&&hit(P,f)){sfx('olum');load(level);return;}
+  }
+  for(const sp of tileRects('^',inkBox)) if(hit(P,sp)){sfx('olum');load(level);return;}
+
+  /*--CUT:IDLE-- 30 sn hareketsizlikte saha kalkar. Tamamen kozmetik. --*/
+  idle=(dir||jump||grab||!P.coy||Math.abs(P.vx)>0.1)?0:idle+1;
+  rear = idle>1800 ? Math.sin(Math.min(1,(idle-1800)/150)*Math.PI) : 0;
+  if(idle>1950) idle=0;
+  /*--/CUT--*/
+  P.run+=Math.abs(P.vx)*0.11;   // daha yavas cevrim: adim okunabilir, nal sesi seyrek
+  const sn=P.run/TAU|0;
+  if(sn!==lastStep&&P.coy>0&&Math.abs(P.vx)>0.9){lastStep=sn;
+    sfx(sn&1?'nal1':'nal2',.75+Math.random()*.4,.92+Math.random()*.16);}
+  hornT*=0.90;tailT*=0.90;
+  if(Math.hypot(P.vx,P.vy)>5.5&&tick%2===0)trail.push({x:P.x+P.w/2,y:P.y+P.h/2,life:1});
+  // dunyanin disi: asagi DUSMEK zaten kontrol ediliyordu, yanlar ve tepe
+  // kontrol edilmiyordu -> oyuncu orada donup gorunmez kaliyordu
+  if(P.y>H+80||P.x+P.w<0||P.x>W||P.y+P.h<0){load(level);return;}
+
+  if(!done&&Math.abs(P.x+P.w/2-exitX)<15&&Math.abs(P.y+P.h-exitY)<24){
+    done=1;sfx('b1');setTimeout(()=>sfx('b2'),110);setTimeout(()=>sfx('b3'),220);
+    setTimeout(()=>load(level+1),480);
+  }
+
+  glitter=glitter.filter(g=>{g.x+=g.vx;g.y+=g.vy;g.vy+=0.055;g.vx*=0.985;
+    g.r+=g.sp; return (g.life-=g.dec)>0;});
+  beams=beams.filter(b=>(b.life-=0.055)>0);
+  rings=rings.filter(r=>(r.life-=0.055)>0);
+  zaps=zaps.filter(z=>(z.life-=0.05)>0);
+  puffs=puffs.filter(p=>{p.x+=p.vx;p.y+=p.vy;p.vy+=0.04;return (p.life-=0.05)>0;});
+  trail=trail.filter(p=>(p.life-=0.045)>0);
+  sparks=sparks.filter(p=>{p.x+=p.vx;p.y+=p.vy;p.vx*=.94;p.vy=p.vy*.94+0.08;return (p.life-=0.035)>0;});
+}
+function zap(x,y){zaps.push({x,y,life:1});}
+
+/* ---------- unicorn ---------- */
+/* ============ UNICORN — riglenmis ============
+   Anatomi TEK yerde tanimli. Cizim de isin cikisi da ayni donusum
+   zincirinden turer, bu yuzden birbirinden kayamazlar.
+   Zincir:  boynuz -> bas -> boyun -> govde -> dunya
+*/
+const US=0.305;                                  // unicorn olcegi
+const A_NECK=[7,-34], A_HEAD=[30,-35],
+      A_HORN=[7,-6], A_TAIL=[-35,-27], HORN_LEN=36;
+const REST_N=0.16, REST_H=0.10;                  // dinlenme pozu (boyun one egik)
+const UP={
+ B:new Path2D('M 12,-35 C 24,-34 31,-28 33,-18 C 35,-10 33,-3 29,1 C 20,4 4,5 -10,4 C -22,3 -31,0 -37,-7 C -43,-16 -42,-28 -34,-33 C -21,-38 -2,-38 12,-35 Z'), N:new Path2D('M -2,-2 C 7,-13 18,-25 29,-35 L 40,-31 C 38,-21 34,-9 30,1 C 28,7 28,12 28,16 C 17,9 5,2 -2,-2 Z'),
+ H:new Path2D('M -1,-1 C 7,-8 18,-8 24,-3 C 30,1 34,6 34,11 C 34,15 30,18 26,17 C 21,15 15,12 11,9 C 6,6 1,3 -1,-1 Z'), J:new Path2D('M 3,3 C 9,3 13,7 13,11 C 8,11 4,7 3,3 Z'),
+ M:new Path2D('M 34,-38 C 27,-43 16,-36 7,-25 C 0,-17 -6,-11 -14,-8 C -8,-3 -1,-2 4,-4 C 12,-11 21,-22 28,-31 Z'), E:new Path2D('M 0,0 C 1,-8 4,-12 8,-14 C 8,-9 5,-3 2,1 Z'),
+ R:new Path2D('M -4,0 C -3.2,-12 -2,-24 0,-36 C 2,-24 3.2,-12 4,0 Z'), F:new Path2D('M -4,0 L 4,0 L 3.4,6 L -3.4,6 Z')
+};
+const MANE=[['M 30,-36 C 22,-37 13,-30 5,-21 C -2,-13 -8,-8 -15,-6',268,2.8],['M 29,-37 C 22,-39 14,-32 7,-24 C 0,-17 -5,-12 -11,-9',232,2.5],['M 28,-39 C 22,-41 15,-35 9,-27 C 3,-21 -2,-16 -7,-13',198,2.2],['M 27,-40 C 22,-42 17,-37 12,-31 C 7,-25 3,-21 -2,-18',172,1.9]].map(a=>[new Path2D(a[0]),a[1],a[2]]);
+const TAIL=[['M -1,-1 C -12,-3 -21,4 -24,15',6,3.4],['M -2,1 C -15,1 -24,11 -25,25',32,3.8],['M -3,3 C -16,5 -24,17 -22,32',54,4.0],['M -4,6 C -16,10 -21,23 -18,39',168,4.0],['M -4,9 C -14,15 -16,29 -12,45',212,3.6],['M -4,12 C -11,19 -11,33 -6,49',282,3.0],['M -2,0 C -12,3 -18,13 -18,25',20,2.0],['M -3,5 C -13,11 -17,25 -14,41',194,2.0]].map(a=>[new Path2D(a[0]),a[1],a[2]]);
+const LEGS=[[[[-29,-16],[-25,-3],[-34,14],[-31,27],[-31,36]],[8,6.4,4.4,3.6],1],[[[26,-16],[27,-1],[28,16],[28,28],[28,36]],[8,6,4.2,3.4],1],[[[-24,-13],[-17,2],[-28,19],[-22,32],[-22,40]],[11,8,5.2,4.2],0],[[[32,-14],[34,3],[35,21],[36,33],[36,40]],[11,7.5,5.2,4],0]];
+
+/* --- NISAN: AYRIK SEKTORLER --------------------------------------
+   Yerel aci A:  0=ileri  -90°=yukari  +90°=asagi  ±180°=geri
+   At donunce A -> 180-A.  Yukari ve asagi bu donusumun SABIT noktalari,
+   yani oraya kor nokta koyarsan donmek kurtarmaz — kalici olu yon olur.
+   Bu yuzden BOYNUZ yukariyi, KUYRUK asagiyi kapsiyor:
+     boynuz  -110°..+20°  (130°)  yukari-geri > yukari > ileri
+     kuyruk   +50°..+200° (150°)  asagi-ileri > asagi > geri
+   Kesisim yok. Kor noktalar +20..+50 ve -160..-110 — ikisi de
+   ati dondurunce diger uzvun sektorune dusuyor.
+   Sektor disinda uzuv NISANDAN ETKILENMEZ, dinlenme pozuna doner.
+------------------------------------------------------------------- */
+const HORN_A0=-1.92, HORN_A1=0.35;
+const TAIL_A0= 0.87, TAIL_A1=3.49;
+const TAIL_REST=2.045, TAIL_LEN=38.1;
+const HORN_REST=REST_N+REST_H;
+let hAng=HORN_REST, tAng=0, hOK=1, tOK=0;
+/*--CUT:JUMP-- havadalik/ezilme durumu. Cikarilirsa asagidaki
+    sabit 0'lar devreye girer, legDraw ve drawUnicorn calismaya devam eder. --*/
+let air=0, sq=0;
+/*--/CUT--*/
+/*--KEEP-IF-CUT:JUMP-- const air=0, sq=0; --*/
+let idle=0, rear=0;           /*--CUT:IDLE--*/
+const wrapA=a=>{while(a>Math.PI)a-=TAU;while(a<-Math.PI)a+=TAU;return a;};
+const inArc=(A,a0,a1)=>{let d=A-a0;while(d<0)d+=TAU;while(d>=TAU)d-=TAU;return d<=a1-a0;};
+function localA(ax,ay){
+  const b=uniXY(ax,ay);
+  return wrapA(P.face>0?Math.atan2(my-b.y,mx-b.x):Math.PI-Math.atan2(my-b.y,mx-b.x));
+}
+function aimStep(){
+  const A1=localA(A_NECK[0]+A_HEAD[0], A_NECK[1]+A_HEAD[1]);
+  hOK=inArc(A1,HORN_A0,HORN_A1)?1:0;
+  hAng+=wrapA((hOK?A1+Math.PI/2:HORN_REST)-hAng)*0.38;
+  const A2=localA(A_TAIL[0],A_TAIL[1]);
+  tOK=inArc(A2,TAIL_A0,TAIL_A1)?1:0;
+  tAng+=wrapA((tOK?A2-TAIL_REST:0)-tAng)*0.32;
+}
+function pose(){
+  const d=hAng-HORN_REST;
+  const n=REST_N+clamp(d*0.15,-0.16,0.16)-rear*0.10;   /*--CUT:IDLE: rear --*/
+  const h=REST_H+clamp(d*0.46,-0.40,0.95)-rear*0.22;   /*--CUT:IDLE: rear --*/
+  return {n, h, r:hAng-n-h, t:tAng+rear*0.55};         /*--CUT:IDLE: rear --*/
+}
+
+/* yerel nokta -> dunya. TEK gecerli donusum. */
+function uniXY(lx,ly){
+  return {x:P.x+P.w/2+P.face*US*lx, y:P.y+P.h/2+US*ly};
+}
+const rot2=(x,y,a)=>{const c=Math.cos(a),s=Math.sin(a);return[x*c-y*s,x*s+y*c];};
+function hornTip(){
+  const p=pose();
+  let [x,y]=rot2(0,-HORN_LEN,p.r);
+  x+=A_HORN[0]; y+=A_HORN[1];  [x,y]=rot2(x,y,p.h);
+  x+=A_HEAD[0]; y+=A_HEAD[1];  [x,y]=rot2(x,y,p.n);
+  return uniXY(x+A_NECK[0], y+A_NECK[1]);
+}
+function tailTip(){
+  const p=pose(), L=TAIL_REST+p.t;
+  return uniXY(A_TAIL[0]+Math.cos(L)*TAIL_LEN, A_TAIL[1]+Math.sin(L)*TAIL_LEN);
+}
+/* uzvun BAKTIGI dunya yonu — isin artik fareye degil buraya gider */
+function limbDir(w){
+  const p=pose();
+  if(w===0){const T=p.n+p.h+p.r; return {x:P.face*Math.sin(T), y:-Math.cos(T)};}
+  const L=TAIL_REST+p.t; return {x:P.face*Math.cos(L), y:Math.sin(L)};
+}
+
+function legDraw(L,ph){
+  const [pts,ws,far]=L, col=far?'#c3c9dc':'#f8f9fd', ed=far?'#8c94ad':'#565e7c';
+  const fr=pts[0][0]>0;                       // on bacak mi
+  let ax=0, ay=0;
+  /*--CUT:JUMP-- ziplama: on bacaklar toplanir, arka bacaklar iter;
+      dususte on bacaklar inise uzanir. inende diz kirilir. --*/
+  const vs=clamp(P.vy/7,-1,1);
+  ax+=air*(fr? 6+vs*16 : -16+vs*10);
+  ay+=air*(fr? -24+vs*14 : -14-vs*8) - sq*14;
+  /*--/CUT--*/
+  /*--CUT:IDLE-- saha kalkinca on bacaklar havayi doverr --*/
+  ax+=rear*(fr? 3+Math.sin(tick*0.23)*11 : 4);
+  ay-=rear*(fr? 34+Math.cos(tick*0.19)*9 : 3);
+  /*--/CUT--*/
+  /* ADIM: bacak ILERI salinirken kalkar, GERI gelirken basar. Bu asimetri
+     "adim atiyor" hissini veren tek sey; simetrik sarkac kaymis gorunuyor.
+     lf sadece cos>0 yariminda pozitif -> kaldir / tasi / bas / sur.
+     Diz: orta halkalar k(1-k) ile geri kalir, on ve arka bacak ters yone
+     kirilir (on diz arkaya, arka bacak dizi one) — at anatomisi boyle. */
+  const A=Math.min(1,Math.abs(P.vx)/RUN)*(1-air*0.75);
+  const st=Math.sin(ph)*A*31, lf=Math.max(0,Math.cos(ph))*A*16;
+  const pp=pts.map((q,i)=>{const k=i/(pts.length-1), kk=k*k;
+    return [q[0]+st*kk-lf*k*(1-k)*(fr?2.6:-2.0)+ax*kk, q[1]-lf*kk+ay*kk];});
+  for(let pass=0;pass<2;pass++){
+    X.strokeStyle=pass?col:ed; X.lineCap='round'; X.shadowBlur=pass?0:GB;
+    for(let i=0;i<pp.length-1;i++){
+      X.lineWidth=ws[i]+(pass?0:1.6);
+      X.beginPath();X.moveTo(pp[i][0],pp[i][1]);X.lineTo(pp[i+1][0],pp[i+1][1]);X.stroke();
+    }
+  }
+  const e=pp[pp.length-1];
+  X.save();X.translate(e[0],e[1]-4);X.fillStyle=far?'#7d8399':'#4a5170';X.fill(UP.F);X.restore();
+}
+
+/* HALE GUCU: shadowBlur'un yogunlugu seklin ALANINA bagli. Govde buyuk,
+   kalin bir hale birakiyor; bas kucuk oldugu icin ayni ayarla ince ve sonuk
+   kaliyordu. Olculdu: bas+boyun toplam halenin %39'u, ama silueti cevreleyen
+   bant govdeninkinin yarisi kadar bile degil.
+   k = damga sayisi (her damga hale alfasini ust uste bindirir)
+   b = o parca icin bulaniklik (dar bulaniklik = ayni enerji ince bantta = daha parlak tepe) */
+const gf=(p,k,b)=>{X.shadowBlur=b||GB;do X.fill(p);while(--k);X.shadowBlur=0;X.stroke(p);};
+function drawUnicorn(){
+  const p=pose();
+  const st=clamp(Math.abs(P.vy)*0.013,0,0.13);           // hizli dusus/cikis: uzar
+  X.save(); X.shadowColor='#cfe6ff';
+  X.translate(P.x+P.w/2,P.y+P.h/2);
+  X.scale(P.face*US*(1+sq*0.13-st*0.5), US*(1-sq*0.18+st));
+  /*--CUT:IDLE-- arka toynaklar etrafinda doner --*/
+  if(rear){X.translate(-21,32);X.rotate(-rear*0.79);X.translate(21,-32);}
+  /*--/CUT--*/
+  X.lineJoin='round';
+  legDraw(LEGS[0],P.run+Math.PI); legDraw(LEGS[1],P.run+Math.PI*0.5);
+
+  X.save(); X.translate(A_TAIL[0],A_TAIL[1]); X.rotate(p.t);
+  for(let pass=0;pass<2;pass++) for(const [pa,h,w] of TAIL){
+    X.shadowBlur=pass?0:GB;
+    X.strokeStyle=pass?`hsl(${h} ${tOK?90:16}% ${tOK?64:60}%)`:'#565e7c';
+    X.lineWidth=w+(pass?0:1.4); X.lineCap='round'; X.stroke(pa);
+  }
+  X.restore();
+
+  X.fillStyle='#f8f9fd'; X.strokeStyle='#565e7c'; X.lineWidth=2;
+
+  X.save(); X.translate(A_NECK[0],A_NECK[1]); X.rotate(p.n);
+  gf(UP.N,2,GB*.75);
+  X.fillStyle='#4a63c8'; X.lineWidth=1.6; X.fill(UP.M); X.stroke(UP.M);
+  for(const [pa,h,w] of MANE){X.strokeStyle=`hsl(${h} 90% 66%)`;X.lineWidth=w;X.stroke(pa);}
+
+  X.save(); X.translate(A_HEAD[0],A_HEAD[1]); X.rotate(p.h);
+  X.fillStyle='#f8f9fd'; X.strokeStyle='#565e7c'; X.lineWidth=2;
+  gf(UP.H,3,GB*.7);
+  X.fillStyle='#e2e6f2'; X.fill(UP.J);
+  X.save();X.translate(1,-3);X.rotate(-0.31);
+  X.fillStyle='#f8f9fd';X.lineWidth=1.4;X.fill(UP.E);X.stroke(UP.E);X.restore();
+  X.fillStyle='#2f3550';X.beginPath();X.ellipse(16,2,2.4,2.8,0,0,TAU);X.fill();
+  X.fillStyle='#fff';X.beginPath();X.ellipse(15.3,1,.9,1,0,0,TAU);X.fill();
+  X.fillStyle='#9aa2bc';X.beginPath();X.ellipse(30,14,1.6,1.2,0,0,TAU);X.fill();
+  X.save(); X.translate(A_HORN[0],A_HORN[1]); X.rotate(p.r);
+  X.shadowBlur=hOK?5+hornT*16:0; X.shadowColor='#57a0ff';
+  X.fillStyle=hOK?'#9ad8ff':'#9098ae'; X.strokeStyle='#565e7c'; X.lineWidth=1.1;
+  X.fill(UP.R); X.stroke(UP.R); X.shadowBlur=0;
+  for(let i=0;i<4;i++){X.lineWidth=.85;X.beginPath();
+    X.moveTo(-3.4+i*.6,-5-i*7.2);X.lineTo(3.4-i*.6,-8-i*7.2);X.stroke();}
+  X.restore(); X.restore(); X.restore();
+
+  X.fillStyle='#f8f9fd'; X.strokeStyle='#565e7c'; X.lineWidth=2;
+  gf(UP.B,1);
+  legDraw(LEGS[2],P.run+Math.PI*1.5); legDraw(LEGS[3],P.run);
+  X.restore();
+}
+
+
+/* ---------- solucan borusu ---------- */
+function bezP(p,t){
+  const u=1-t,a=u*u*u,b=3*u*u*t,c=3*u*t*t,d=t*t*t;
+  return {x:a*p[0].x+b*p[1].x+c*p[2].x+d*p[3].x,
+          y:a*p[0].y+b*p[1].y+c*p[2].y+d*p[3].y};
+}
+function bezD(p,t){
+  const u=1-t;
+  return {x:3*u*u*(p[1].x-p[0].x)+6*u*t*(p[2].x-p[1].x)+3*t*t*(p[3].x-p[2].x),
+          y:3*u*u*(p[1].y-p[0].y)+6*u*t*(p[2].y-p[1].y)+3*t*t*(p[3].y-p[2].y)};
+}
+function tubeAt(p,t){
+  const c=bezP(p,t),d=bezD(p,t),L=Math.hypot(d.x,d.y)||1;
+  return {x:c.x,y:c.y,nx:-d.y/L,ny:d.x/L,ang:Math.atan2(d.y,d.x),
+          w:(TW0+(TW1-TW0)*t)*(1+0.12*Math.sin(t*Math.PI)),t};
+}
+const shade=u=>36+26*Math.cos(u*1.30);
+
+function drawTube(){
+  const a=portals[0],b=portals[1];
+  if(!a||!b)return;
+  const d=Math.hypot(b.px-a.px,b.py-a.py)*0.42+26;
+  const p=[{x:a.px,y:a.py},{x:a.px+a.nx*d,y:a.py+a.ny*d},
+           {x:b.px+b.nx*d,y:b.py+b.ny*d},{x:b.px,y:b.py}];
+  TW0=pShapes(a).ap; TW1=pShapes(b).ap;
+  const ring=[];
+  for(let i=0;i<=FS_NT;i++)ring.push(tubeAt(p,i/FS_NT));
+
+  // KARSI-FAZ: desen yer degistirmiyor, sadece kontrast ceviriliyor.
+  // Karsi-faz bir izgara, esit guclu iki ZIT yonlu dalganin toplamidir;
+  // beyin yonu secemez ve boru iki yone birden akiyor gorunur. Portal
+  // cift yonlu oldugu icin dogru uyaran bu. (illusion-lab "4 · Dort Vurus"
+  // dugmesi adi ustunde dort adim vaat ediyor ama pos*0.5 yuzunden iki
+  // adima cokuyor; olcup gorduk. Begenilen sey karsi-faz, dort vurus degil.)
+  // Duvar saatinden okunur: 60Hz de 144Hz de ayni hizda gorunur.
+  const sg=(performance.now()/FS_MS&1)?-1:1;
+
+  X.save();
+  for(let j=0;j<FS_BAND;j++){
+    const u0=-1+2*j/FS_BAND,u1=-1+2*(j+1)/FS_BAND;
+    const f=(j+0.5)/FS_BAND;
+    const hue=TB_H0+(TB_H1-TB_H0)*f;
+    for(let i=0;i<FS_NT;i++){
+      const tm=(i+0.5)/FS_NT;
+      const m=Math.sin(TAU*FS_K*tm)*sg;
+      X.fillStyle=`hsl(${hue} ${FS_SAT}% ${FS_L0+FS_AMP*m}%)`;
+      const A0=ring[i],B0=ring[i+1];
+      X.beginPath();
+      X.moveTo(A0.x+A0.nx*A0.w*u0,A0.y+A0.ny*A0.w*u0);
+      X.lineTo(B0.x+B0.nx*B0.w*u0,B0.y+B0.ny*B0.w*u0);
+      X.lineTo(B0.x+B0.nx*B0.w*u1,B0.y+B0.ny*B0.w*u1);
+      X.lineTo(A0.x+A0.nx*A0.w*u1,A0.y+A0.ny*A0.w*u1);
+      X.closePath();X.fill();
+    }
+  }
+  X.restore();
+
+  const pts=[];
+  for(let i=0;i<=TUBE_SEG;i++)pts.push(tubeAt(p,i/TUBE_SEG));
+  X.lineWidth=1.3;X.strokeStyle='rgba(16,20,38,0.7)';X.lineCap='round';
+  for(const sd of [-1,1]){
+    X.beginPath();
+    pts.forEach((q,i)=>{const x=q.x+q.nx*q.w*sd,y=q.y+q.ny*q.w*sd;
+      i?X.lineTo(x,y):X.moveTo(x,y);});
+    X.stroke();
+  }
+}
+
+/* ---------- portal: hipnoz spirali ---------- */
+const COOL=['#7b3cf0','#3a72f0','#28c8ff','#c6f5ff'];
+const WARM=['#e01c5a','#ff5a24','#ffb01c','#fff0b0'];
+const PAL=[
+  {dom:214,s:96,glow:'#3a7bff',rim:'#cfeaff'},   // BOYNUZ: mavi agirlikli
+  {dom:334,s:96,glow:'#ff2f6a',rim:'#ffd6e4'}    // KUYRUK: pembe agirlikli
+];
+/* ---------- PORTAL: duvara carpip yapismis KALIN YAGLI BOYA ----------
+   Sekiller portal dogdugunda bir kez uretilir (tohum p.born'dan).
+   Yuvarlak ana kutle + yonlu uzantilar + akan damlalar + sicrayan zerreler.
+------------------------------------------------------------------------- */
+function prnd(st){let z=st;return()=>((z=z*16807%2147483647)/2147483647);}
+function splatPath(R,sq,seed,tend){
+  const R7=prnd(seed||1), L=11, pt=[], ta=[];
+  for(let j=0;j<tend;j++)ta.push(R7()*TAU);
+  for(let i=0;i<L;i++){
+    const a=i/L*TAU; let k=1+(R7()-.5)*0.30;
+    for(const t of ta){
+      let dd=Math.abs(((a-t+Math.PI)%TAU+TAU)%TAU-Math.PI);
+      if(dd<0.55){const q=1-dd/0.55; k+=0.45*q*q;}
+    }
+    pt.push([Math.cos(a)*R*k*sq, Math.sin(a)*R*k]);
+  }
+  const pa=new Path2D(); pa.moveTo(pt[0][0],pt[0][1]);
+  for(let i=0;i<L;i++){const q=pt[i],w=pt[(i+1)%L];
+    pa.quadraticCurveTo(q[0],q[1],(q[0]+w[0])/2,(q[1]+w[1])/2);}
+  pa.closePath(); return pa;
+}
+function dripPath(R,seed,n){
+  const R7=prnd(seed||1), pa=new Path2D();
+  for(let j=0;j<n;j++){
+    const ang=Math.PI*(0.18+0.64*(j+0.5+(R7()-.5)*0.7)/n);
+    const bx=Math.cos(ang)*R*0.7, by=Math.sin(ang)*R*0.55;
+    const w=R*(0.05+R7()*0.05), ln=R*(0.4+R7()*1.5);
+    pa.moveTo(bx-w,by);
+    pa.bezierCurveTo(bx-w*1.1,by+ln*.5, bx-w*.65,by+ln*.86, bx,by+ln);
+    pa.bezierCurveTo(bx+w*.65,by+ln*.86, bx+w*1.1,by+ln*.5, bx+w,by);
+    pa.closePath();
+  }
+  return pa;
+}
+function pShapes(p){
+  if(p._s)return p._s;
+  const wall=Math.abs(p.nx)>0.5, sq=wall?0.70:1.34, R=T*0.30, sd=(p.cx*73+p.cy*179+7)|0;
+  // damla: zeminde yok (boya ustte birikir), duvarda orta, tavanda uzun
+  const dn = p.ny<-0.5 ? 0 : (wall?3:5), dl = p.ny>0.5?1.65:1.0;
+  const R7=prnd(sd+70), sp=[];
+  for(let j=0;j<5;j++){const a=R7()*TAU, r=R*(1.35+R7()*0.7);
+    sp.push([Math.cos(a)*r*sq, Math.sin(a)*r*0.8, R*(0.04+R7()*0.08)]);}
+  return p._s={sq, R, wall, ap:R*1.1*(wall?1:sq),   // boruya DIK yari aciklik
+    d:dn?dripPath(R*dl,sd+40,dn):null, a:splatPath(R,sq,sd,3),
+    b:splatPath(R*0.72,sq,sd+1,2), c:splatPath(R*0.40,sq,sd+2,2),
+    h:splatPath(R*0.52,sq*0.95,sd+3,1), sp};
+}
+function drawPortal(p,hot,sink){
+  if(!p)return;
+  const open=clamp((tick-p.born)/9,0,1), S=pShapes(p);
+  const pal=p.warm?PAL[1]:PAL[0], col=p.warm?PAINT[1]:PAINT[0];
+  X.save(); X.translate(p.px,p.py); X.scale(open,open);
+  X.shadowBlur=hot?16:9; X.shadowColor=pal.glow;
+  X.fillStyle=col[0];
+  if(S.d)X.fill(S.d);
+  X.fill(S.a);
+  X.shadowBlur=0;
+  for(const [x,y,r] of S.sp){X.beginPath();X.ellipse(x,y,r,r*0.8,0,0,TAU);X.fill();}
+  X.fillStyle=col[1]; X.save(); X.translate(0,-T*0.033); X.fill(S.b); X.restore();
+  X.fillStyle=col[2]; X.save(); X.translate(-T*0.04,-T*0.075); X.fill(S.c); X.restore();
+  // delik: boyanin altindaki bosluk, hafif nefes alir
+  X.save(); X.translate(-T*0.017,T*0.017);
+  X.scale(1+0.05*Math.sin(radPhase*sink*TAU),1+0.05*Math.cos(radPhase*sink*TAU));
+  X.fillStyle='rgba(20,18,40,.88)'; X.fill(S.h); X.restore();
+  // islak parlama
+  X.save(); X.translate(-T*0.10,-T*0.118); X.rotate(-0.52);
+  X.fillStyle='rgba(255,255,255,.62)';
+  X.beginPath(); X.ellipse(0,0,T*0.072,T*0.036,0,0,TAU); X.fill(); X.restore();
+  X.restore();
+}
+
+/* ---------- isin ---------- */
+/* ---------- FIRLATIS: savrulan boya. Dipte ortusen kalin bloblar,
+   ileride cizgiden sapip damlalara ayrilir. Cizgi degil, boya. ------- */
+function drawBeam(b){
+  const dx=b.x1-b.x0, dy=b.y1-b.y0, L=Math.hypot(dx,dy)||1;
+  const px=-dy/L, py=dx/L, a=b.life, ang=Math.atan2(dy,dx);
+  const col=b.warm?PAINT[1]:PAINT[0], W=7.6*(0.45+0.55*a), N=34;
+  const R7=prnd((b.seed*9973|0)+1);
+  X.save();
+  X.shadowBlur=8*a; X.shadowColor=b.warm?'#ff5a24':'#3a72f0';
+  const ch=[];
+  for(let i=0;i<N;i++){
+    const t=Math.pow(i/(N-1),1.12), sc=Math.pow(1-t,0.85), r=W*(0.30+0.70*sc);
+    const off=(R7()-.5)*W*2.2*t*t + Math.sin(t*4+b.seed)*W*0.30;
+    ch.push([b.x0+dx*t+px*off, b.y0+dy*t+py*off, r*(2.1+1.6*t), r*(0.88-0.28*t), t]);
+  }
+  X.globalAlpha=a; X.fillStyle=col[0];
+  for(const [x,y,rx,ry] of ch){
+    X.save();X.translate(x,y);X.rotate(ang);
+    X.beginPath();X.ellipse(0,0,rx,ry,0,0,TAU);X.fill();X.restore();
+  }
+  X.shadowBlur=0; X.fillStyle=col[2];
+  for(const [x,y,rx,ry,t] of ch){                   // islak parlama: USTTE
+    if(t>0.62)continue;
+    const f=1-t/0.62;
+    X.globalAlpha=a*0.55*f;
+    X.save();X.translate(x,y);X.rotate(ang);
+    X.beginPath();X.ellipse(0,-ry*0.42,rx*0.62,ry*0.30*f,0,0,TAU);X.fill();X.restore();
+  }
+  X.restore();
+}
+function drawRing(r){
+  const a=r.life;
+  X.save();X.globalAlpha=a*0.75;X.lineWidth=2.4*a;
+  X.strokeStyle=r.gray?'#98a0b6':(r.warm?WARM[2]:COOL[2]);
+  X.shadowBlur=r.gray?0:12;X.shadowColor=X.strokeStyle;
+  X.beginPath();X.arc(r.x,r.y,(1-a)*17+3,0,7);X.stroke();X.restore();
+}
+
+/* ---------- varliklar ---------- */
+function drawCube(c){
+  if(c.hv){                                              // --- ORS ---
+    X.save();X.translate(c.x+c.w/2,c.y+c.h/2);
+    X.fillStyle='#454b60';X.strokeStyle='#22263a';X.lineWidth=1.3;
+    X.beginPath();                                        // klasik ors silueti
+    X.moveTo(-8.5,7);X.lineTo(8.5,7);X.lineTo(6.5,3);X.lineTo(2.5,1);
+    X.lineTo(3,-2.5);X.lineTo(8.5,-3);X.lineTo(8.5,-7);X.lineTo(-5,-7);
+    X.quadraticCurveTo(-10,-6.5,-8.5,-3.5);X.lineTo(-3,-2.5);
+    X.lineTo(-2.5,1);X.lineTo(-6.5,3);X.closePath();X.fill();X.stroke();
+    X.strokeStyle='#7c85a0';X.lineWidth=1;                // ust parlama
+    X.beginPath();X.moveTo(-4.5,-6);X.lineTo(7,-6);X.stroke();
+    X.restore();return;
+  }
+  const carry=c===carried;
+  X.save();X.translate(c.x+c.w/2,c.y+c.h/2);
+  if(carry){X.shadowBlur=12;X.shadowColor='#9fd0ff';}
+  X.fillStyle='#e8eefc';X.strokeStyle='#59627f';X.lineWidth=1.4;
+  X.beginPath();X.roundRect(-c.w/2,-c.h/2,c.w,c.h,4);X.fill();X.stroke();
+  X.shadowBlur=0;
+  // gokkusagi kalp: yuzeydeki bantlar
+  for(let i=0;i<5;i++){
+    X.strokeStyle=`hsl(${i*58+tick*0.6%360} 88% 62%)`;
+    X.lineWidth=1.5;
+    X.beginPath();X.moveTo(-3.6,-4+i*2);X.lineTo(3.6,-4+i*2);X.stroke();
+  }
+  X.restore();
+}
+function drawLazer(){
+  X.save();X.lineCap='round';X.strokeStyle='#ff5a7a';
+  for(const [a,b,c,d] of lz){
+    X.globalAlpha=.3;X.lineWidth=6+Math.sin(tick*.2)*1.5;   // 1.9 Hz nabiz, 3 Hz altinda
+    X.beginPath();X.moveTo(a,b);X.lineTo(c,d);X.stroke();
+    X.globalAlpha=1;X.lineWidth=1.5;X.beginPath();X.moveTo(a,b);X.lineTo(c,d);X.stroke();
+  }
+  X.restore();
+}
+function drawEntities(){
+  for(let y=0;y<ROWS;y++)for(let x=0;x<COLS;x++){
+    const ch=map[y][x];
+    if(ch==='B'){
+      const pressed=gateOn;
+      X.fillStyle=pressed?'#7de0a8':'#8791ad';
+      X.shadowBlur=pressed?12:0;X.shadowColor='#7de0a8';
+      X.beginPath();X.roundRect(x*T+2,y*T+T-(pressed?4:7),T-4,pressed?4:7,2);
+      X.fill();X.shadowBlur=0;
+      X.fillStyle='rgba(255,255,255,0.25)';
+      X.fillRect(x*T+4,y*T+T-(pressed?4:7)+1,T-8,1.2);
+    }else if(ch==='^'){
+      /* MUREKKEP: sivi hale gelmis renksizlik. Yuzey dalgasi MUTLAK x'ten
+         turuyor (x*T+i*4), bu yuzden yan yana karolar dikissiz birlesiyor.
+         Ustunde de murekkep varsa yuzey yok, duz dolgu — derinlik boyle cikiyor.
+         Yuzeydeki gokkusagi cizgisi yag tabakasi: yuttugu renkler.
+         Hue karo basina kayiyor ve yavas suruklenıyor; parlaklik degismiyor,
+         yani WCAG 2.3.1 acisindan cakma degil. */
+      X.fillStyle='#06050e';
+      if(cellAt(x,y-1)==='^'){X.fillRect(x*T,y*T,T,T);}
+      else{
+        const w=[];
+        for(let i=0;i<=6;i++){const wx=x*T+i*4;
+          w.push([wx,y*T+5+Math.sin(wx*.085+tick*.03)*2.2+Math.sin(wx*.21-tick*.019)*1.1]);}
+        X.beginPath();X.moveTo(x*T,y*T+T);
+        for(const q of w)X.lineTo(q[0],q[1]);
+        X.lineTo(x*T+T,y*T+T);X.fill();
+        X.strokeStyle=`hsl(${(x*37+tick*.6)%360} 90% 60%)`;
+        X.lineWidth=1.3;X.globalAlpha=.42;X.beginPath();
+        w.forEach((q,i)=>i?X.lineTo(q[0],q[1]):X.moveTo(q[0],q[1]));
+        X.stroke();X.globalAlpha=1;
+      }
+    }else if(ch==='L'||ch==='R'){
+      X.fillStyle='#2a2f44';X.fillRect(x*T,y*T,T,T);
+      X.fillStyle=ch==='L'?'#ff4d6d':rOn?'#7de0a8':'#5a6078';
+      X.beginPath();X.arc(x*T+12,y*T+12,ch==='L'?4:6,0,7);X.fill();
+    }else if(ch==='|'){
+      // prizma perdesi: kayan spektrum
+      X.save();
+      X.beginPath();X.rect(x*T+5,y*T,T-10,T);X.clip();
+      for(let k=-1;k<8;k++){
+        const off=((tick*0.9+k*8)%(T+16))-8;
+        X.fillStyle=`hsla(${(k*44+tick*1.6)%360},95%,62%,0.55)`;
+        X.fillRect(x*T+5,y*T+off,T-10,5);
+      }
+      X.restore();
+      X.strokeStyle='rgba(255,255,255,0.5)';X.lineWidth=1.2;
+      X.beginPath();X.moveTo(x*T+5,y*T);X.lineTo(x*T+5,y*T+T);
+      X.moveTo(x*T+T-5,y*T);X.lineTo(x*T+T-5,y*T+T);X.stroke();
+    }else if(ch==='G'){
+      if(gateOn){
+        X.strokeStyle='rgba(150,230,190,0.30)';X.lineWidth=1;
+        X.strokeRect(x*T+1.5,y*T+1.5,T-3,T-3);
+      }else{
+        X.fillStyle='rgba(120,150,215,0.30)';
+        X.fillRect(x*T,y*T,T,T);
+        X.strokeStyle='rgba(190,215,255,0.75)';X.lineWidth=1.3;
+        X.strokeRect(x*T+1,y*T+1,T-2,T-2);
+        X.fillStyle=`rgba(255,255,255,${0.10+0.06*Math.sin(tick*0.1+y)})`;
+        X.fillRect(x*T+3,y*T+3,T-6,T-6);
+      }
+    }
+  }
+}
+
+/* ---------- sahne ---------- */
+function radii(x,y,type,r){
+  const s=(dx,dy)=>cellAt(x+dx,y+dy)===type;
+  return [(s(0,-1)||s(-1,0))?0:r,(s(0,-1)||s(1,0))?0:r,
+          (s(0,1)||s(1,0))?0:r,(s(0,1)||s(-1,0))?0:r];
+}
+/* yildizlar acilista bir kez */
+/* tuval dokusu: acilista bir kez, sonra sadece cizilir */
+const CANVAS_TX=[];
+{const R7=prnd(20260913);
+ for(let i=0;i<260;i++)CANVAS_TX.push(
+   [R7()*624,R7()*336,0.6+R7()*2.2,0.012+R7()*0.030,R7()<.5]);}
+const STARS=[];for(let i=0;i<42;i++)STARS.push(
+  [Math.random()*624,Math.random()*190,.4+Math.random()*1.2,Math.random()*9,.02+Math.random()*.03]);
+function drawWorld(){
+
+  const sky=X.createLinearGradient(0,0,0,H);
+  sky.addColorStop(0,'#2c3242');sky.addColorStop(.45,'#414b62');
+  sky.addColorStop(1,'#5c6880');
+  X.fillStyle=sky;X.fillRect(0,0,W,H);
+  const br=X.createRadialGradient(W*.34,H*.72,10,W*.34,H*.72,H*.9);
+  br.addColorStop(0,'rgba(222,234,252,.30)');br.addColorStop(1,'rgba(214,226,246,0)');
+  X.fillStyle=br;X.fillRect(0,0,W,H);            // bulut arasindan sizan isik
+  X.save();X.globalAlpha=0.30;X.lineWidth=11;    // gokkusagi: yagmurun icinden
+  for(let i=0;i<7;i++){
+    X.strokeStyle=`hsl(${i*45} 78% 60%)`;
+    X.beginPath();X.arc(W*0.30,H*1.30,255+i*11,Math.PI*1.14,Math.PI*1.86);X.stroke();
+  }
+  X.restore();
+  for(let L=0;L<2;L++){                          // kara bulut kutleleri
+    X.fillStyle=L?'rgba(44,51,70,.62)':'rgba(28,33,48,.86)';
+    for(let i=0;i<6;i++){
+      const bx=((i*173+L*90+tick*(L?0.10:0.05))%(W+240))-120, by=10+L*24+((i*37)%13);
+      X.beginPath();
+      X.ellipse(bx,by,74-L*16,24-L*6,0,0,TAU);
+      X.ellipse(bx+46,by+6,52-L*12,18-L*5,0,0,TAU);
+      X.ellipse(bx-44,by+7,44-L*10,16-L*4,0,0,TAU);
+      X.fill();
+    }
+  }
+  X.save();X.strokeStyle='#d8e6fa';X.lineWidth=.85;
+  for(let k=0;k<2;k++){                          // egik yagmur, iki derinlik
+    X.globalAlpha=k?.30:.17;X.beginPath();
+    for(let i=0;i<70;i++){
+      const sp=(k?1.6:1)+(i%3)*.35, y=((i*89+k*47+tick*8*sp)%(H+34))-17,
+            x=((i*151+k*73)%(W+90))-45-y*.34, l=(k?13:9)+(i%4)*4;
+      X.moveTo(x,y);X.lineTo(x-l*.32,y+l);
+    }
+    X.stroke();
+  }
+  X.restore();
+  // vinyet: koseler kararir (fayanslarin ALTINDA, HUD etkilenmez)
+  const vg=X.createRadialGradient(W/2,H*.44,H*.42,W/2,H*.5,H*.95);
+  vg.addColorStop(0,'rgba(0,0,0,0)');vg.addColorStop(1,'rgba(10,14,26,.42)');
+  X.fillStyle=vg;X.fillRect(0,0,W,H);
+  // TUVAL DOKUSU: bezin dokusunu taklit eden kisa cizikler
+  for(const [tx,ty,tl,ta,yatay] of CANVAS_TX){
+    X.fillStyle=`rgba(${yatay?'255,250,240':'40,30,60'},${ta})`;
+    if(yatay)X.fillRect(tx,ty,tl*2.4,0.9); else X.fillRect(tx,ty,0.9,tl*2.4);
+  }
+  for(let y=0;y<ROWS;y++)for(let x=0;x<COLS;x++){
+    const c=map[y][x];
+    if(c==='#'){
+      X.fillStyle='#1e2334';
+      X.beginPath();X.roundRect(x*T,y*T,T,T,radii(x,y,'#',4));X.fill();
+      if(!isSolid(x,y-1)){X.fillStyle='rgba(200,220,255,.20)';
+        X.fillRect(x*T+2,y*T,T-4,1.6);}
+      if(cellAt(x,y-1)!=='#'){X.fillStyle='#2b3248';X.fillRect(x*T+1,y*T+1,T-2,2.5);}
+    }else if(c==='='){
+      X.save();X.shadowBlur=10;X.shadowColor='rgba(170,200,255,0.40)';
+      X.fillStyle='#dde6f7';
+      X.beginPath();X.roundRect(x*T,y*T,T,T,radii(x,y,'=',10));X.fill();X.restore();
+      if(cellAt(x,y-1)!=='='){
+        X.fillStyle='#f2f6ff';
+        X.beginPath();X.arc(x*T+7,y*T+6,6,0,7);X.arc(x*T+17,y*T+5,7,0,7);X.fill();
+      }
+      X.fillStyle='rgba(90,110,150,0.22)';
+      X.beginPath();X.arc(x*T+8,y*T+17,4.5,0,7);X.arc(x*T+17,y*T+18,5.5,0,7);X.fill();
+    }
+  }
+  chest();
+}
+/* --- HAZINE SANDIGI: agzindan boya tasan tahta sandik.
+   Organik sekiller ACILISTA bir kez uretilir (her karede degil).
+   Blob'lar PORTAL makinesinden geliyor: prnd + splatPath. Sandigin
+   kendi blob/damla/silindir kodu YOK — v23'te vardi, 787 bayt tutuyordu.
+   Tahta tamamen dikdortgen tablosundan cizilir (CB), tek dongu. --- */
+const CHC=['#ff4d6d','#ffd23f','#3fb8ff','#3ddc84','#8a5cff'];
+const CW=['#7a5432','#8d6238','#5e3f24','#2f2013','#caa24a'];
+const CB=[[-13,-13,26,13,0,1],[-13,-13,4.6,13,2,0],[-13.6,-10.8,27.2,1.3,4,0],
+          [-13.6,-3.4,27.2,1.3,4,0],[-2.5,-9.4,5,4.8,4,1]];
+let CH=null;
+function chestBuild(){
+  const R=prnd(7), at=(r,sq,sd,t)=>splatPath(r,sq,sd,t);
+  CH={
+    pl:CHC.map((c,i)=>[at(1.5+R()*1.1,i?3.2:4.4,i+3,3),c,-22+i*8.5+(R()-.5)*4]),
+    lip:CHC.map((c,i)=>[at(1.4+R()*.6,1.5,i+9,2),c,-9+i*4.5]),
+    dr:CHC.map((c,i)=>{const pa=new Path2D();
+      for(let j=0;j<2;j++){const x=-11.6+i*5.5+j*2.5+(R()-.5)*1.5,
+        w=.5+R()*.55, l=2+R()*10;
+        pa.moveTo(x-w,0);pa.quadraticCurveTo(x-w,l,x,l);pa.quadraticCurveTo(x+w,l,x+w,0);}
+      return [pa,c];}),
+    st:CHC.map((c,i)=>[at(1.1+R()*.8,1,i+15,2),c,-9.5+i*4.7,-9+R()*6])
+  };
+}
+function chest(){
+  if(!CH)chestBuild();
+  const F=(pa,c,x,y)=>{X.save();X.translate(x,y||0);X.fillStyle=c;X.fill(pa);X.restore();};
+  X.save(); X.translate(exitX,exitY);
+  X.globalAlpha=.93;                                  // 1. yerdeki boya golu
+  for(const [pa,c,x] of CH.pl)F(pa,c,x,-1.2);
+  X.globalAlpha=1;
+  X.fillStyle=CW[1];X.beginPath();                    // 2. acik kapak
+  X.moveTo(-13,-13);X.lineTo(-10.5,-24);X.lineTo(10.5,-24);X.lineTo(13,-13);X.fill();
+  X.fillStyle=CW[3];X.beginPath();                    //    ic yuzu (karanlik)
+  X.moveTo(-10.7,-22.6);X.lineTo(10.2,-22.6);X.lineTo(11.6,-13.6);X.lineTo(-11.6,-13.6);X.fill();
+  for(let i=0;i<5;i++){X.fillStyle=CHC[i];X.beginPath();   // 3. icini dolduran boya
+    X.roundRect(-10.8+i*4.4,-21+(i&1)*1.3,4,7.8,1.6);X.fill();}
+  for(const [pa,c,x] of CH.lip)F(pa,c,x,-14.2);       // 4. agizdan tasan
+  for(const [x,y,w,h,c,r] of CB){                     // 5. on duvar + bant + kilit
+    X.fillStyle=CW[c];X.beginPath();X.roundRect(x,y,w,h,r);X.fill();}
+  X.fillStyle=CW[3];X.beginPath();X.arc(0,-7,1,0,TAU);X.fill();
+  X.save();X.translate(-27,-3);X.rotate(-1.88);      // 6. devrilmis boya kutusu
+  X.fillStyle=CHC[0];X.beginPath();X.roundRect(-3.4,0,6.8,10.5,2);X.fill();
+  X.fillStyle='#c2304c';X.beginPath();X.roundRect(1.1,0,2.3,10.5,1);X.fill();
+  X.fillStyle='#2b1420';X.beginPath();X.ellipse(0,0,3.4,1.4,0,0,TAU);X.fill();
+  X.fillStyle=CHC[0];X.beginPath();X.ellipse(0,.3,2.5,1,0,0,TAU);X.fill();
+  X.restore();
+  X.globalAlpha=.92;                                  // 7. tahtadaki lekeler
+  for(const [pa,c,x,y] of CH.st)F(pa,c,x,y);
+  X.globalAlpha=1;
+  for(const [pa,c] of CH.dr)F(pa,c,0,-13);            // 8. on kenardan akanlar
+  X.globalAlpha=1; X.restore();
+  if(!done&&tick%26===0)glit(exitX+(Math.random()-.5)*20,exitY-16,1,0.5);
+}
+function drawFoe(f){
+  const cx=f.x+f.w/2, cy=f.y+f.h/2;
+  X.save();X.translate(cx,cy);
+  X.fillStyle='rgba(9,10,20,0.94)';
+  X.beginPath();                                          // titreyen siluet
+  for(let i=0;i<=12;i++){
+    const a=i/12*TAU;
+    const r=(7.5+Math.sin(a*3+f.ph)*1.4+Math.sin(a*5-f.ph*1.7)*0.9)
+            *(1+0.06*Math.sin(f.ph*2));
+    const px=Math.cos(a)*r*0.95, py=Math.sin(a)*r+Math.sin(f.ph)*0.8;
+    i?X.lineTo(px,py):X.moveTo(px,py);
+  }
+  X.closePath();X.fill();
+  X.globalAlpha=0.35;X.fillStyle='#090a14';               // ust duman
+  X.beginPath();X.arc(-3+Math.sin(f.ph*1.3)*2,-9,3,0,7);
+  X.arc(3+Math.cos(f.ph)*2,-10,2.2,0,7);X.fill();
+  X.globalAlpha=1;
+  const lk=Math.sign(f.vx)*1.6;                           // bakis yonu
+  X.fillStyle='#4a5578';
+  X.beginPath();X.ellipse(-3+lk,-1.5,1.5,2.1,0,0,TAU);
+  X.ellipse(3+lk,-1.5,1.5,2.1,0,0,TAU);X.fill();
+  X.restore();
+}
+function drawFx(){
+  for(const p of trail){
+    X.globalAlpha=p.life*0.5;
+    X.fillStyle=`hsl(${(p.x+p.y)*1.4%360} 90% 65%)`;
+    X.beginPath();X.arc(p.x,p.y,4.5*p.life,0,7);X.fill();
+  }
+  X.globalAlpha=1;
+  for(const b of beams)drawBeam(b);
+  for(const r of rings)drawRing(r);
+  for(const z of zaps){
+    X.globalAlpha=z.life;
+    for(let i=0;i<6;i++){
+      X.strokeStyle=`hsl(${i*60} 95% 65%)`;X.lineWidth=1.6*z.life;
+      const a=i*1.05+tick*0.2,r=(1-z.life)*20+4;
+      X.beginPath();X.moveTo(z.x,z.y);
+      X.lineTo(z.x+Math.cos(a)*r,z.y+Math.sin(a)*r);X.stroke();
+    }
+  }
+  for(const g of glitter){
+    const k=g.k*(0.35+0.65*g.life), c=`hsl(${g.h} ${g.s}% ${g.l}%)`;
+    X.save();X.translate(g.x,g.y);X.rotate(g.r);
+    X.globalAlpha=g.life;X.fillStyle=c;X.shadowBlur=7*g.life;X.shadowColor=c;
+    X.beginPath();
+    X.moveTo(0,-k*2.7);X.quadraticCurveTo(k*.26,-k*.26,k*2.7,0);
+    X.quadraticCurveTo(k*.26,k*.26,0,k*2.7);
+    X.quadraticCurveTo(-k*.26,k*.26,-k*2.7,0);
+    X.quadraticCurveTo(-k*.26,-k*.26,0,-k*2.7);
+    X.fill();X.restore();
+  }
+  X.shadowBlur=0;X.globalAlpha=1;
+  for(const p of sparks){
+    X.globalAlpha=p.life;X.fillStyle=(p.warm?WARM:COOL)[1];
+    X.beginPath();X.arc(p.x,p.y,2*p.life+0.6,0,7);X.fill();
+  }
+  for(const p of puffs){
+    X.globalAlpha=p.life*0.5;X.fillStyle='#8f96ac';
+    X.beginPath();X.arc(p.x,p.y,2.6*p.life+0.7,0,7);X.fill();
+  }
+  X.globalAlpha=1;
+}
+/*--CUT:PLAY-- baslangic ekrani. Ayri kare dongusu YOK: frame() zaten her
+   seyi ciziyor, biz sadece update()'i durdurup ustune perde ve baslik
+   koyuyoruz. tick elle artiyor ki arkadaki yagmur ve bulutlar yasasin. --*/
+let started=0;
+function title(){
+  X.fillStyle='rgba(8,10,22,.58)';X.fillRect(0,0,W,H);
+  X.save();X.textAlign='center';
+  const g=X.createLinearGradient(W*.28,0,W*.72,0);
+  for(let i=0;i<7;i++)g.addColorStop(i/6,`hsl(${i*45} 86% 64%)`);
+  X.fillStyle=g;X.font='700 34px system-ui,sans-serif';
+  X.fillText('RAINWORMHOLE',W/2,H*.44);
+  X.fillStyle='rgba(228,234,250,'+(.45+.3*Math.sin(tick*.06))+')';
+  X.font='600 11px system-ui,sans-serif';
+  X.fillText('PRESS ANY KEY  /  TAP TO START',W/2,H*.44+28);
+  X.fillStyle='rgba(228,234,250,.62)';X.font='500 9.5px system-ui,sans-serif';
+  if(IS_TOUCH)X.fillText('TAP TO AIM  \u00b7  \u25c9 BUTTONS FIRE PORTALS  \u00b7  \u25a3 GRAB',W/2,H*.44+58);
+  else{X.fillText('A D / ARROWS  MOVE   \u00b7   SPACE  JUMP   \u00b7   E  GRAB   \u00b7   R  RESTART',W/2,H*.44+58);
+    X.fillText('LEFT CLICK  COLD PORTAL (HORN)   \u00b7   RIGHT CLICK  WARM PORTAL (TAIL)',W/2,H*.44+73);}
+  X.restore();
+}
+/*--/CUT--*/
+function drawHud(){
+  // Tek yazi: bolum sayaci. Kelime YOK -> hicbir dile bagli degil.
+  // Ipucu metinleri v30'da tamamen kaldirildi; ogretme bolum tasarimiyla.
+  X.font='600 10px system-ui,sans-serif';
+  X.fillStyle='rgba(228,234,250,0.55)';
+  X.fillText((level+1)+'/'+LEVELS.length,9,16);
+  if(!IS_TOUCH&&cubes.some(c=>!c.hv)){X.textAlign='right';X.fillText('E  GRAB / DROP',W-9,16);X.textAlign='left';}
+  if(done){X.fillStyle='rgba(255,255,255,0.13)';X.fillRect(0,0,W,H);}
+}
+
+/* ---------- dongu ---------- */
+let scale=1,ox=0,oy=0,dpr=1;
+function resize(){
+  // Retina: tuval FIZIKSEL piksel sayisinda, CSS boyutu viewport kadar.
+  // dpr olmadan 2x ekranda oyun yarim cozunurlukte cizilip buyutuluyordu.
+  dpr=Math.min(devicePixelRatio||1,2);
+  C.width=innerWidth*dpr;C.height=innerHeight*dpr;
+  C.style.width=innerWidth+'px';C.style.height=innerHeight+'px';
+  scale=Math.min(C.width/W,C.height/H);
+  ox=(C.width-W*scale)/2;oy=(C.height-H*scale)/2;
+  GB=GB0*scale;
+}
+addEventListener('resize',resize);
+function frame(){
+  started?update():tick++;   /*--CUT:PLAY: baslamadan once dunya donuk --*/
+  X.setTransform(1,0,0,1,0,0);
+  X.fillStyle='#0d0f1a';X.fillRect(0,0,C.width,C.height);
+  X.setTransform(scale,0,0,scale,ox,oy);
+  if(shake>0.3){X.translate((Math.random()-.5)*shake,(Math.random()-.5)*shake);shake*=0.86;}
+  X.save();X.beginPath();X.rect(0,0,W,H);X.clip();
+  drawWorld();drawEntities();drawLazer();drawTube();
+  drawPortal(portals[0],hornT>0.12, 1);
+  drawPortal(portals[1],tailT>0.12,-1);
+  drawFx();
+  for(const c of cubes)drawCube(c);
+  for(const f of foes)drawFoe(f);
+  drawUnicorn();started?drawHud():title();  /*--CUT:PLAY--*/
+  /*--CUT:DIKEY-- telefon dikeyken oyun ekranin %25ine dusuyor --*/
+  if(innerHeight>innerWidth){
+    X.fillStyle='rgba(8,10,22,.82)';X.fillRect(0,0,W,H);
+    X.save();X.textAlign='center';X.fillStyle='#dfe4f2';
+    X.font='700 15px system-ui,sans-serif';
+    X.fillText('ROTATE YOUR DEVICE',W/2,H/2);X.restore();
+  }
+  /*--/CUT--*/
+  /*--KEEP-IF-CUT:PLAY--  drawUnicorn();drawHud();  --*/
+  X.restore();
+  requestAnimationFrame(frame);
+}
+addEventListener('keydown',e=>{
+  if(zzfxX.state==='suspended')zzfxX.resume();
+  music();                                   /*--CUT:MUZIK: baslat --*/
+  started=1;                                 /*--CUT:PLAY: tusla basla --*/
+  if(e.key==='m'||e.key==='M'){muted=!muted;
+    if(MG)MG.gain.value=muted?0:1;           /*--CUT:MUZIK: M ile sustur --*/
+    sb_.textContent=muted?'\u2715':'\u266a'; sb_.style.opacity=muted?.85:.5;}
+  keys[e.key.toLowerCase()]=true;
+  if(e.key===' ')e.preventDefault();
+  if(e.key.toLowerCase()==='r')load(level);   // R = bolumu bastan: OYUNCU OZELLIGI, kalsin
+});
+addEventListener('keyup',e=>keys[e.key.toLowerCase()]=false);
+C.addEventListener('contextmenu',e=>e.preventDefault());
+C.addEventListener('mousemove',e=>{mx=(e.clientX*dpr-ox)/scale;my=(e.clientY*dpr-oy)/scale;});
+C.addEventListener('mousedown',e=>{
+  e.preventDefault();
+  if(!started){started=1;return;}   /*--CUT:PLAY: ilk tiklama baslatir --*/
+  if(IS_TOUCH)return;              // dokunmatikte atis ekran tuslarindan
+  if(e.button===0)fire(0);
+  if(e.button===2)fire(1);
+});
+/* --------- MOBIL: kaba isaretcili cihazda ekran tuslari --------- */
+const IS_TOUCH=matchMedia('(pointer:coarse)').matches||'ontouchstart' in window;
+/* ekran tusu uretici — hem mobil kontroller hem ses dugmesi kullaniyor */
+const mk=(txt,css,dn,up)=>{
+  const b=document.createElement('div');
+  b.className='tb'; b.textContent=txt; b.style.cssText=css;
+  b.addEventListener('pointerdown',e=>{e.preventDefault();
+    if(zzfxX.state==='suspended')zzfxX.resume();
+    music();                                 /*--CUT:MUZIK: baslat --*/
+    started=1;                               /*--CUT:PLAY: tusla basla --*/
+    dn();});
+  if(up){for(const ev of ['pointerup','pointercancel','pointerleave'])
+    b.addEventListener(ev,e=>{e.preventDefault();up();});}
+  document.body.appendChild(b); return b;
+};
+/* ses dugmesi: her cihazda, altta ortada. M tusuyla ayni durumu paylasir */
+const sb_=mk('\u266a','left:50%;margin-left:-22px;bottom:14px;width:44px;height:44px;font-size:18px;opacity:.5',
+  ()=>{muted=!muted; if(MG)MG.gain.value=muted?0:1;
+       sb_.textContent=muted?'\u2715':'\u266a'; sb_.style.opacity=muted?.85:.5;});
+if(IS_TOUCH){
+  // sol: yon
+  mk('\u25c0','left:14px;bottom:16px;width:66px;height:66px',()=>keys.a=1,()=>keys.a=0);
+  mk('\u25b6','left:92px;bottom:16px;width:66px;height:66px',()=>keys.d=1,()=>keys.d=0);
+  // kup al/birak = E. Basis kenar tetikli (grab&&!ePrev), tek dokunus tek islem
+  mk('\u25a3','left:92px;bottom:92px;width:58px;height:58px;font-size:22px',()=>keys.e=1,()=>keys.e=0);
+  // sag: zipla + iki portal (renkleri portallarla ayni)
+  mk('\u2b06','right:14px;bottom:16px;width:74px;height:74px',()=>keys.w=1,()=>keys.w=0);
+  const pc=mk('\u25c9','right:22px;bottom:104px;width:58px;height:58px',()=>fire(0));
+  pc.style.color='#57a0ff'; pc.style.borderColor='#57a0ff';
+  const pw=mk('\u25c9','right:92px;bottom:76px;width:58px;height:58px',()=>fire(1));
+  pw.style.color='#ff8a3d'; pw.style.borderColor='#ff8a3d';
+  // yeniden basla
+  const rb=mk('\u27f3','right:12px;top:12px;width:44px;height:44px;font-size:20px',
+    ()=>load(level));
+  rb.style.opacity=.7;
+  // ekrana dokunmak = nisan (atis butonlardan)
+  C.addEventListener('pointerdown',e=>{mx=(e.clientX*dpr-ox)/scale;my=(e.clientY*dpr-oy)/scale;});
+  C.addEventListener('pointermove',e=>{mx=(e.clientX*dpr-ox)/scale;my=(e.clientY*dpr-oy)/scale;});
+}
+resize();load(0);frame();
+</script>
+</body>
+</html>

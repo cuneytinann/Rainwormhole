@@ -1,0 +1,405 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+<meta charset="utf-8">
+<title>Rainwormhole — Bölüm Atölyesi</title>
+<style>
+:root{--bg:#12141f;--panel:#1a1d2c;--line:#2e3348;--ink:#dfe4f2;--dim:#8b93ad;
+      --acc:#5b8cff;--ok:#5fe0a0;--warn:#ffb648;--bad:#ff6b7a}
+*{box-sizing:border-box}
+html,body{margin:0;height:100%;background:var(--bg);color:var(--ink);
+  font:13px/1.5 ui-sans-serif,system-ui,sans-serif;overflow:hidden}
+#app{display:flex;height:100%}
+#main{flex:1;display:flex;flex-direction:column;min-width:0;overflow:auto;padding:12px}
+#side{width:330px;background:var(--panel);border-left:1px solid var(--line);
+  padding:12px;flex:none;overflow-y:auto}
+h3{margin:14px 0 6px;font-size:10px;letter-spacing:.1em;text-transform:uppercase;
+  color:var(--dim);font-weight:600}
+h3:first-child{margin-top:0}
+canvas#grid{background:#0d0f1a;border-radius:6px;display:block;cursor:crosshair;
+  image-rendering:pixelated}
+button{padding:6px 9px;border-radius:6px;border:1px solid var(--line);background:#222639;
+  color:var(--ink);cursor:pointer;font:inherit;font-size:12px}
+button:hover{border-color:var(--acc)}
+button.on{background:#26407a;border-color:var(--acc)}
+button:disabled{opacity:.4;cursor:not-allowed}
+.row{display:flex;gap:6px;flex-wrap:wrap;align-items:center}
+#pal{display:grid;grid-template-columns:repeat(2,1fr);gap:5px}
+#pal button{display:flex;align-items:center;gap:7px;text-align:left;padding:5px 7px}
+#pal i{width:15px;height:15px;border-radius:3px;flex:none;font-style:normal}
+#pal small{color:var(--dim);margin-left:auto;font-size:10px}
+#drop{border:1.5px dashed var(--line);border-radius:8px;padding:16px;text-align:center;
+  color:var(--dim);margin-bottom:10px;font-size:12px}
+#drop.hot{border-color:var(--acc);color:var(--ink)}
+#drop.ok{border-style:solid;border-color:#2f6b43;background:#15321f;color:var(--ink);padding:9px}
+#lvls{display:flex;flex-direction:column;gap:3px;margin-top:5px}
+.lv{display:flex;align-items:center;gap:7px;padding:4px 7px;border-radius:5px;
+  border:1px solid transparent;cursor:pointer;font-size:12px}
+.lv:hover{background:#222639}
+.lv.on{background:#26407a;border-color:var(--acc)}
+.lv b{color:var(--dim);font-variant-numeric:tabular-nums;width:16px}
+.lv span{color:var(--dim);font-size:10.5px;margin-left:auto;font-family:ui-monospace,monospace}
+#out{width:100%;height:120px;background:#0e1120;border:1px solid var(--line);border-radius:6px;
+  padding:7px;font:10.5px/1.4 ui-monospace,Menlo,Consolas,monospace;color:#9fd8ff;
+  white-space:pre;resize:vertical;margin-top:5px}
+#chk div{padding:4px 7px;border-radius:5px;margin-bottom:3px;font-size:11.5px;line-height:1.35}
+.c-ok{background:#15321f;color:#bdf0d4} .c-warn{background:#33290f;color:#ffdfab}
+.c-bad{background:#3a1519;color:#ffc2c8}
+#play{position:fixed;inset:0;background:#000c;display:none;z-index:20;
+  align-items:center;justify-content:center;flex-direction:column;gap:8px}
+#play.on{display:flex}
+#frame{border:0;border-radius:8px;background:#0d0f1a;width:900px;height:500px}
+.hint{color:var(--dim);font-size:11px;line-height:1.4}
+kbd{background:#222639;border:1px solid var(--line);border-radius:3px;padding:0 4px;font-size:10.5px}
+</style>
+</head>
+<body>
+<div id="app">
+  <div id="main">
+    <div id="drop">
+      <b>Oyunun HTML dosyasını buraya sürükle</b><br>
+      <span class="hint">Atölyenin kendi motoru yok. Bölümü ne ile deneyeceğini
+      sen veriyorsun, o yüzden bayatlayamaz.</span>
+    </div>
+    <canvas id="grid" width="728" height="392"></canvas>
+    <div class="row" style="margin-top:9px">
+      <button id="bPlay" disabled>▶ Bu bölümü oyna</button>
+      <button id="bClear">Temizle</button>
+      <button id="bFill">Çerçeve</button>
+      <span class="hint" id="pos" style="margin-left:auto"></span>
+    </div>
+    <div class="hint" style="margin-top:8px">
+      Sol tık boya · sağ tık sil · sürükle · <kbd>1</kbd>–<kbd>9</kbd> karo seç ·
+      <kbd>Z</kbd> geri al
+    </div>
+  </div>
+
+  <div id="side">
+    <h3>Karolar</h3>
+    <div id="pal"></div>
+
+    <h3>Bölümler</h3>
+    <div class="row">
+      <button id="bAdd">+ yeni</button>
+      <button id="bDup">kopyala</button>
+      <button id="bDel">sil</button>
+      <button id="bUp">▲</button>
+      <button id="bDown">▼</button>
+    </div>
+    <div id="lvls"></div>
+
+    <h3>Denetim</h3>
+    <div id="chk"></div>
+
+    <h3>Çıktı</h3>
+    <div class="row">
+      <button id="bCopy">panoya kopyala</button>
+      <button id="bDl" disabled>oyun HTML'i indir</button>
+    </div>
+    <textarea id="out" readonly spellcheck="false"></textarea>
+    <div class="hint" id="cost"></div>
+  </div>
+</div>
+
+<div id="play"><iframe id="frame"></iframe>
+  <div class="hint">kapatmak için <kbd>Esc</kbd> · tıklayıp başlat</div></div>
+
+<script>
+/* ============================================================
+   BOLUM ATOLYESI — Rainwormhole
+
+   Eski editorun derdi: icine OYUNUN BIR KOPYASINI gomuyordu ve o kopya
+   zamanla ayri bir oyuna donusuyordu (carpisma kutusu 11x17 kalmisti,
+   nisan sektorleri hic yoktu, '^' hala dikendi). Burada gomulu motor YOK.
+   Oyunun HTML'ini surukluyorsun; atolye onun icindeki LEVELS dizisini
+   degistirip iframe'de AYNI dosyayi calistiriyor. Bayatlamasi mumkun degil.
+   ============================================================ */
+
+const COLS=26, ROWS=14, T=28;                 // T sadece EKRAN olcegi (oyunda 24)
+const KARO=[
+  {c:'.', ad:'boşluk',  renk:'#0d0f1a', tus:'1'},
+  {c:'#', ad:'taş',     renk:'#1e2334', tus:'2'},
+  {c:'=', ad:'bulut',   renk:'#dde6f7', tus:'3'},
+  {c:'S', ad:'başlangıç',renk:'#7de0a8',tus:'4'},
+  {c:'E', ad:'çıkış',   renk:'#ffd23f', tus:'5'},
+  {c:'C', ad:'küp',     renk:'#8d6238', tus:'6'},
+  {c:'A', ad:'örs',     renk:'#79839c', tus:'7'},
+  {c:'B', ad:'düğme',   renk:'#8791ad', tus:'8'},
+  {c:'G', ad:'kapı',    renk:'#7890d7', tus:'9'},
+  {c:'|', ad:'prizma',  renk:'#b46cff', tus:'0'},
+  {c:'^', ad:'mürekkep',renk:'#06050e', tus:'M'},
+  {c:'K', ad:'karartı', renk:'#3a3550', tus:'K'},
+  {c:'L', ad:'lazer',   renk:'#ff4d6d', tus:'L'},
+  {c:'R', ad:'alıcı',   renk:'#7de0a8', tus:'R'},
+];
+const KATI=c=>c==='#'||c==='='||c==='G'||c==='L'||c==='R';
+
+let oyunSrc=null, seviyeler=[[]], cur=0, sec='#', gecmis=[];
+
+/* ---------- yardimcilar ---------- */
+const bos=()=>{const g=[];for(let y=0;y<ROWS;y++)g.push('.'.repeat(COLS));return g;};
+const G=()=>seviyeler[cur];
+function yaz(x,y,ch){
+  if(x<0||y<0||x>=COLS||y>=ROWS)return;
+  const r=G()[y]; if(r[x]===ch)return;
+  G()[y]=r.slice(0,x)+ch+r.slice(x+1);
+}
+function anlikKaydet(){gecmis.push(JSON.stringify(seviyeler));if(gecmis.length>60)gecmis.shift();}
+
+/* ---------- OYUN DOSYASINA BOLUMLERI GOMME ----------
+   Tek dogru yer burasi. testEnjekte() ile node'dan da sinanabiliyor. */
+function enjekte(src, lvls, basla){
+  const govde=lvls.map(rows=>'['+rows.map(r=>"'"+r+"'").join(',')+']').join(',\n');
+  let o=src.replace(/const LEVELS=\[\n[\s\S]*?\n\];/, 'const LEVELS=[\n'+govde+'\n];');
+  o=o.replace(/resize\(\);load\(0\);frame\(\);/, 'started=1;resize();load('+basla+');frame();');
+  return o;
+}
+
+/* ---------- cizim ---------- */
+const cv=document.getElementById('grid'), X=cv.getContext('2d');
+function ciz(){
+  X.clearRect(0,0,cv.width,cv.height);
+  X.fillStyle='#0d0f1a';X.fillRect(0,0,cv.width,cv.height);
+  for(let y=0;y<ROWS;y++)for(let x=0;x<COLS;x++){
+    const c=G()[y][x], px=x*T, py=y*T;
+    if(c==='#'){X.fillStyle='#1e2334';X.fillRect(px,py,T,T);
+      X.fillStyle='#2b3248';X.fillRect(px+1,py+1,T-2,3);}
+    else if(c==='='){X.fillStyle='#dde6f7';X.beginPath();X.roundRect(px,py,T,T,8);X.fill();
+      X.fillStyle='rgba(90,110,150,.22)';X.beginPath();X.arc(px+9,py+19,5,0,7);X.fill();}
+    else if(c==='^'){X.fillStyle='#06050e';X.fillRect(px,py,T,T);
+      if(G()[y-1]?.[x]!=='^'){X.strokeStyle=`hsl(${(x*37)%360} 90% 60%)`;X.lineWidth=1.6;
+        X.globalAlpha=.55;X.beginPath();
+        for(let i=0;i<=7;i++){const wx=px+i*T/7, wy=py+5+Math.sin(wx*.075)*2.4;
+          i?X.lineTo(wx,wy):X.moveTo(wx,wy);}X.stroke();X.globalAlpha=1;}}
+    else if(c!=='.'){
+      const k=KARO.find(k=>k.c===c);
+      X.fillStyle=k?k.renk:'#ff00ff';
+      X.beginPath();X.roundRect(px+3,py+3,T-6,T-6,4);X.fill();
+      X.fillStyle='#0d0f1a';X.font='bold 13px ui-monospace,monospace';
+      X.textAlign='center';X.textBaseline='middle';X.fillText(c,px+T/2,py+T/2+1);
+    }
+  }
+  X.strokeStyle='rgba(255,255,255,.045)';X.lineWidth=1;
+  for(let x=0;x<=COLS;x++){X.beginPath();X.moveTo(x*T+.5,0);X.lineTo(x*T+.5,ROWS*T);X.stroke();}
+  for(let y=0;y<=ROWS;y++){X.beginPath();X.moveTo(0,y*T+.5);X.lineTo(COLS*T,y*T+.5);X.stroke();}
+  /* mobil ekran tuslarinin oturdugu alt koseler (devir teslim, tuzak 2) */
+  X.strokeStyle='rgba(255,182,72,.30)';X.setLineDash([4,3]);
+  X.strokeRect(.5,(ROWS-3)*T+.5,5*T,3*T);
+  X.strokeRect(COLS*T-5*T+.5,(ROWS-3)*T+.5,5*T-1,3*T-1);
+  X.setLineDash([]);
+}
+
+/* ---------- fare ---------- */
+let basili=0;
+const hucre=e=>{const r=cv.getBoundingClientRect();
+  return [Math.floor((e.clientX-r.left)/(r.width/COLS)), Math.floor((e.clientY-r.top)/(r.height/ROWS))];};
+cv.addEventListener('contextmenu',e=>e.preventDefault());
+cv.addEventListener('pointerdown',e=>{anlikKaydet();basili=e.button===2?2:1;
+  const [x,y]=hucre(e);yaz(x,y,basili===2?'.':sec);ciz();guncelle();});
+cv.addEventListener('pointermove',e=>{const [x,y]=hucre(e);
+  document.getElementById('pos').textContent=`${x},${y}`;
+  if(basili){yaz(x,y,basili===2?'.':sec);ciz();guncelle();}});
+addEventListener('pointerup',()=>basili=0);
+
+/* ---------- palet ---------- */
+const pal=document.getElementById('pal');
+KARO.forEach(k=>{
+  const b=document.createElement('button');
+  b.innerHTML=`<i style="background:${k.renk}"></i>${k.ad}<small>${k.c}</small>`;
+  b.onclick=()=>{sec=k.c;[...pal.children].forEach(c=>c.classList.remove('on'));b.classList.add('on');};
+  if(k.c==='#')b.classList.add('on');
+  pal.appendChild(b);
+});
+addEventListener('keydown',e=>{
+  if(e.key==='Escape'){document.getElementById('play').classList.remove('on');
+    document.getElementById('frame').srcdoc='';return;}
+  if(e.target.tagName==='TEXTAREA'||e.target.tagName==='INPUT')return;
+  if(e.key==='z'||e.key==='Z'){const g=gecmis.pop();
+    if(g){seviyeler=JSON.parse(g);cur=Math.min(cur,seviyeler.length-1);ciz();guncelle();}return;}
+  const k=KARO.find(k=>k.tus.toLowerCase()===e.key.toLowerCase());
+  if(k){sec=k.c;[...pal.children].forEach((c,i)=>c.classList.toggle('on',KARO[i].c===k.c));}
+});
+
+
+/* ---------- yercekimli erisim ----------
+   Durum = SERBEST hucre. Hareketler: dus / bas / zipla.
+   Basmak ve ziplamak icin ALTINDA kati olmasi sart (P.coy mantigi).
+   ZIP_Y=2 karo, ZIP_X=5 karo — OLCULDU (havada 4.2 px/kare'ye hizlaniyor). */
+const ZIP_Y=2, ZIP_X=5;
+function erisim(g,S,E){
+  const serbest=(x,y)=>x>=0&&y>=0&&x<COLS&&y<ROWS&&!KATI(g[y][x])&&g[y][x]!=='^';
+  const yerde=(x,y)=>!serbest(x,y+1)&&(y+1>=ROWS?false:KATI(g[y+1][x]));
+  const gor=new Set(), q=[S];
+  const ekle=(x,y)=>{const k=x+','+y;if(serbest(x,y)&&!gor.has(k)){gor.add(k);q.push([x,y]);}};
+  gor.add(S.join(','));
+  while(q.length){
+    const [x,y]=q.pop();
+    if(x===E[0]&&y===E[1])return true;
+    if(serbest(x,y+1)){ekle(x,y+1);continue;}      // havadaysa once duser
+    if(!yerde(x,y))continue;
+    ekle(x-1,y);ekle(x+1,y);                        // yuru
+    for(let dy=1;dy<=ZIP_Y;dy++){                   // zipla
+      if(!serbest(x,y-dy))break;
+      for(let dx=-ZIP_X;dx<=ZIP_X;dx++){
+        let ok=1;
+        for(let i=1;i<=Math.abs(dx);i++) if(!serbest(x+Math.sign(dx)*i,y-dy)){ok=0;break;}
+        if(ok)ekle(x+dx,y-dy);
+      }
+    }
+  }
+  return gor.has(E.join(','));
+}
+
+/* ---------- DENETIM ---------- */
+function denetle(){
+  const g=G(), m=[];
+  const say=ch=>g.join('').split(ch).length-1;
+  const bul=ch=>{for(let y=0;y<ROWS;y++){const x=g[y].indexOf(ch);if(x>=0)return[x,y];}return null;};
+
+  if(g.length!==ROWS||g.some(r=>r.length!==COLS))
+    m.push(['bad',`Izgara bozuk: ${g.length} satır, genişlikler ${[...new Set(g.map(r=>r.length))]}`]);
+
+  const nS=say('S'), nE=say('E');
+  if(nS!==1)m.push(['bad',`Tam 1 tane S olmalı, ${nS} tane var.`]);
+  if(nE!==1)m.push(['bad',`Tam 1 tane E olmalı, ${nE} tane var.`]);
+
+  const S=bul('S'), E=bul('E');
+  if(S){
+    /* KAPAN TESTI: oyuncu kutusu 17x20, karo 24 -> kendi hucresi bos olmali.
+       Dort yani kati ise dogus hucresi cep demektir, oyun kilitlenir. */
+    const [sx,sy]=S, kom=[[0,-1],[0,1],[-1,0],[1,0]]
+      .map(([dx,dy])=>{const r=g[sy+dy];return r?r[sx+dx]:'#';});
+    if(kom.every(KATI))m.push(['bad','S dört yanı kapalı bir cepte — oyuncu çıkamaz.']);
+    if(g[sy-1]&&KATI(g[sy-1][sx]))m.push(['warn','S’nin üstü kapalı; zıplayacak yer yok.']);
+    if(!g[sy+1]||!KATI(g[sy+1][sx]))m.push(['warn','S havada duruyor, oyuncu doğar doğmaz düşecek.']);
+    const alt=g[sy+1]?g[sy+1][sx]:'.';
+    if(alt==='^')m.push(['bad','S doğrudan mürekkebin üstünde — anında ölüm.']);
+  }
+  if(E){const [ex,ey]=E;
+    if(g[ey][ex]==='E'&&(g[ey+1]?g[ey+1][ex]:'#')==='^')
+      m.push(['warn','E mürekkebin üstünde; sandığa ulaşmak imkânsız olabilir.']);
+  }
+
+  /* PORTALSIZ ERISIM — yercekimli.
+     Ziplama menzili OLCULDU (harness, duz zemin, tus basili):
+       tepe  = 2.02 karo (JUMP^2/2GRAV = 51.9 px)
+       yatay = 5.2 karo — havada AIRCAP=4.2 > RUN=2.4, oyuncu havada hizlanir.
+     Formulle 3 karo cikmisti; olcum 5.2. Formul yaniltti, olcum kazandi. */
+  if(S&&E) m.push(erisim(g,S,E)
+    ? ['warn','Çıkışa portal kullanmadan gidilebiliyor — bulmaca kaçmış olabilir.']
+    : ['ok','Çıkışa portalsız ulaşılamıyor. Bulmaca duruyor.']);
+
+  /* tutarlilik */
+  if(say('G')&&!say('B'))m.push(['warn','Kapı (G) var ama düğme (B) yok — kapı hiç açılmaz.']);
+  if(say('B')&&!say('C')&&!say('A'))m.push(['warn','Düğme (B) var ama basacak küp/örs yok.']);
+  if(say('=')===0)m.push(['warn','Hiç bulut yok — portal tutacak yüzey yok.']);
+
+  /* alt koseler: mobilde ekran tuslarinin altinda kalir */
+  let kose=0;
+  for(let y=ROWS-3;y<ROWS;y++)for(let i=0;i<5;i++)
+    {if('SECABG|K'.includes(g[y][i]))kose++; if('SECABG|K'.includes(g[y][COLS-1-i]))kose++;}
+  if(kose)m.push(['warn',`Alt köşelerde ${kose} hassas karo — mobilde ekran tuşlarının altında kalır.`]);
+
+  if(!m.some(x=>x[0]!=='ok'))m.unshift(['ok','Bölüm temiz.']);
+  const el=document.getElementById('chk');
+  el.innerHTML=m.map(([k,t])=>`<div class="c-${k}">${t}</div>`).join('');
+}
+
+/* ---------- liste / cikti ---------- */
+function liste(){
+  const el=document.getElementById('lvls');el.innerHTML='';
+  seviyeler.forEach((L,i)=>{
+    const d=document.createElement('div');
+    d.className='lv'+(i===cur?' on':'');
+    const ozet=['S','E','C','A','B','G','|','^','K'].filter(c=>L.join('').includes(c)).join('');
+    d.innerHTML=`<b>${i+1}</b>bölüm<span>${ozet||'—'}</span>`;
+    d.onclick=()=>{cur=i;ciz();guncelle();};
+    el.appendChild(d);
+  });
+}
+function cikti(){
+  const s='const LEVELS=[\n'+seviyeler.map(L=>'['+L.map(r=>"'"+r+"'").join(',')+']').join(',\n')+'\n];';
+  document.getElementById('out').value=s;
+  const ham=seviyeler.length*ROWS*(COLS+3);
+  document.getElementById('cost').textContent=
+    `${seviyeler.length} bölüm · ${ham} ham karakter. Gerçek zip maliyeti sadece `+
+    `paket.js ile ölçülür; son ölçümde bir bölüm ≈ 31–60 bayt.`;
+}
+function guncelle(){liste();cikti();denetle();}
+
+/* ---------- dugmeler ---------- */
+document.getElementById('bAdd').onclick=()=>{anlikKaydet();seviyeler.splice(cur+1,0,bos());cur++;ciz();guncelle();};
+document.getElementById('bDup').onclick=()=>{anlikKaydet();seviyeler.splice(cur+1,0,[...G()]);cur++;ciz();guncelle();};
+document.getElementById('bDel').onclick=()=>{if(seviyeler.length<2)return;anlikKaydet();
+  seviyeler.splice(cur,1);cur=Math.max(0,cur-1);ciz();guncelle();};
+document.getElementById('bUp').onclick=()=>{if(!cur)return;anlikKaydet();
+  [seviyeler[cur-1],seviyeler[cur]]=[seviyeler[cur],seviyeler[cur-1]];cur--;ciz();guncelle();};
+document.getElementById('bDown').onclick=()=>{if(cur>=seviyeler.length-1)return;anlikKaydet();
+  [seviyeler[cur+1],seviyeler[cur]]=[seviyeler[cur],seviyeler[cur+1]];cur++;ciz();guncelle();};
+document.getElementById('bClear').onclick=()=>{anlikKaydet();seviyeler[cur]=bos();ciz();guncelle();};
+document.getElementById('bFill').onclick=()=>{anlikKaydet();
+  const g=bos();
+  g[0]='#'.repeat(COLS); g[ROWS-1]='#'.repeat(COLS);
+  for(let y=1;y<ROWS-1;y++)g[y]='#'+'.'.repeat(COLS-2)+'#';
+  seviyeler[cur]=g;ciz();guncelle();};
+document.getElementById('bCopy').onclick=()=>{
+  navigator.clipboard.writeText(document.getElementById('out').value);
+  const b=document.getElementById('bCopy');b.textContent='kopyalandı';
+  setTimeout(()=>b.textContent='panoya kopyala',900);};
+
+document.getElementById('bPlay').onclick=()=>{
+  if(!oyunSrc)return;
+  document.getElementById('frame').srcdoc=enjekte(oyunSrc,seviyeler,cur);
+  document.getElementById('play').classList.add('on');
+  setTimeout(()=>document.getElementById('frame').focus(),120);
+};
+document.getElementById('bDl').onclick=()=>{
+  if(!oyunSrc)return;
+  const html=oyunSrc.replace(/const LEVELS=\[\n[\s\S]*?\n\];/,
+    'const LEVELS=[\n'+seviyeler.map(L=>'['+L.map(r=>"'"+r+"'").join(',')+']').join(',\n')+'\n];');
+  const a=document.createElement('a');
+  a.href=URL.createObjectURL(new Blob([html],{type:'text/html'}));
+  a.download='rainwormhole-yeni-bolumler.html';a.click();
+};
+
+/* ---------- oyun dosyasini yukle ---------- */
+const drop=document.getElementById('drop');
+['dragenter','dragover'].forEach(t=>drop.addEventListener(t,e=>{
+  e.preventDefault();drop.classList.add('hot');}));
+['dragleave','drop'].forEach(t=>drop.addEventListener(t,e=>{
+  e.preventDefault();drop.classList.remove('hot');}));
+drop.addEventListener('drop',e=>{
+  const f=e.dataTransfer.files[0]; if(!f)return;
+  const r=new FileReader(); r.onload=()=>yukle(r.result,f.name); r.readAsText(f);
+});
+drop.addEventListener('click',()=>{
+  const i=document.createElement('input');i.type='file';i.accept='.html';
+  i.onchange=()=>{const r=new FileReader();r.onload=()=>yukle(r.result,i.files[0].name);
+    r.readAsText(i.files[0]);};i.click();});
+
+function yukle(txt,ad){
+  const m=txt.match(/const LEVELS=\[\n([\s\S]*?)\n\];/);
+  if(!m){drop.innerHTML='<b class="c-bad">Bu dosyada LEVELS dizisi bulunamadı.</b>';return;}
+  oyunSrc=txt;
+  const lv=m[1].split('\n').filter(r=>r.trim().startsWith('['))
+    .map(r=>r.match(/'[^']*'/g).map(x=>x.slice(1,-1)));
+  seviyeler=lv.length?lv:[bos()]; cur=0;
+
+  /* dosyadan gercek degerleri oku, atolyenin varsayimlariyla karsilastir */
+  const kutu=txt.match(/w:(\d+),h:(\d+),ground/);
+  const kars=new Set(m[1].replace(/[^A-Za-z0-9.#=|^]/g,'').split(''));
+  const bilinmez=[...kars].filter(c=>!KARO.some(k=>k.c===c));
+  drop.className='ok';
+  drop.innerHTML=`<b>${ad}</b> yüklendi — ${seviyeler.length} bölüm`+
+    (kutu?` · çarpışma kutusu ${kutu[1]}×${kutu[2]}`:'')+
+    (bilinmez.length?`<br><span style="color:var(--bad)">Palette olmayan karo: ${bilinmez.join(' ')}</span>`:'')+
+    `<br><span class="hint">Oyna düğmesi bu dosyayı çalıştırır. Motor kopyası yok.</span>`;
+  document.getElementById('bPlay').disabled=false;
+  document.getElementById('bDl').disabled=false;
+  ciz();guncelle();
+}
+
+seviyeler=[bos()];document.getElementById('bFill').onclick();
+</script>
+</body>
+</html>

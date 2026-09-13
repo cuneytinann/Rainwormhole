@@ -1,0 +1,218 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+<meta charset="utf-8">
+<title>Rainwormhole — Genlik / Titreşim Tezgâhı</title>
+<style>
+  :root{--bg:#12141f;--panel:#1a1d2c;--line:#2e3348;--ink:#dfe4f2;--dim:#8b93ad;--acc:#5b8cff;--ok:#5fe0a0;--warn:#ffb648;--bad:#ff6b7a}
+  *{box-sizing:border-box}
+  html,body{margin:0;height:100%;background:var(--bg);color:var(--ink);
+    font:13px/1.5 ui-sans-serif,system-ui,sans-serif;overflow:hidden}
+  #app{display:flex;height:100%}
+  #left{flex:1;display:flex;flex-direction:column;min-width:0;overflow-y:auto}
+  .row{padding:6px 14px 0}
+  .cap{font-size:11.5px;color:var(--dim);display:flex;justify-content:space-between;
+       align-items:baseline;margin-bottom:3px}
+  .cap b{color:var(--ink);font-size:12.5px}
+  canvas.t{display:block;border-radius:5px;background:#191d33;width:100%;max-width:620px}
+  #panel{width:310px;background:var(--panel);border-left:1px solid var(--line);
+    padding:13px;flex:none;overflow-y:auto}
+  h3{margin:15px 0 7px;font-size:10px;letter-spacing:.1em;text-transform:uppercase;
+    color:var(--dim);font-weight:600}
+  h3:first-child{margin-top:0}
+  .sl{margin-bottom:11px}
+  .sl label{display:flex;justify-content:space-between;font-size:12px}
+  .sl label b{color:var(--acc);font-variant-numeric:tabular-nums}
+  .sl input{width:100%;accent-color:var(--acc)}
+  .sl .h{font-size:11px;color:var(--dim);line-height:1.35;margin-top:2px}
+  button{width:100%;padding:7px 10px;margin-bottom:5px;border-radius:6px;
+    border:1px solid var(--line);background:#222639;color:var(--ink);cursor:pointer;
+    font:inherit;font-size:12px;text-align:left}
+  button.on{background:#26407a;border-color:var(--acc)}
+  table{width:100%;border-collapse:collapse;font-size:11.5px;margin-top:4px}
+  td{padding:3px 2px;border-bottom:1px solid var(--line)}
+  td:last-child{text-align:right;font-variant-numeric:tabular-nums}
+  .v-ok{color:var(--ok)} .v-warn{color:var(--warn)} .v-bad{color:var(--bad)}
+  #verdict{margin-top:9px;padding:8px 10px;border-radius:6px;font-size:11.5px;line-height:1.45}
+  #out{width:100%;height:74px;background:#0e1120;border:1px solid var(--line);border-radius:6px;
+    padding:7px;font:11px/1.45 ui-monospace,Menlo,Consolas,monospace;color:#9fd8ff;
+    white-space:pre;resize:vertical;margin-top:4px}
+</style>
+</head>
+<body>
+<div id="app">
+  <div id="left">
+    <div class="row"><div class="cap"><b>senin ayarın</b><span id="c0"></span></div>
+      <canvas class="t" id="t0" width="620" height="120"></canvas></div>
+    <div class="row"><div class="cap"><b>kıyas · genlik 22 (eski v27 — ARTIK KULLANILMIYOR)</b><span id="c1"></span></div>
+      <canvas class="t" id="t1" width="620" height="120"></canvas></div>
+    <div class="row"><div class="cap"><b>kıyas · genlik 8 (çok sakin)</b><span id="c2"></span></div>
+      <canvas class="t" id="t2" width="620" height="120"></canvas></div>
+    <div class="row" style="padding-bottom:14px">
+      <div class="cap"><b>kontrol · titreşim yok</b><span>illüzyon olmamalı</span></div>
+      <canvas class="t" id="t3" width="620" height="120"></canvas></div>
+  </div>
+
+  <div id="panel">
+    <h3>Ayar</h3>
+    <div class="sl"><label>genlik FS_AMP<b id="vA"></b></label>
+      <input type="range" id="A" min="2" max="30" value="12">
+      <div class="h">Açıklık salınımının yüzdesi. İllüzyonun <i>mekanizması</i> genlikten
+        bağımsız; ama çok düşerse göz hareketi okuyamaz hale gelir.</div></div>
+    <div class="sl"><label>adım süresi FS_MS<b id="vM"></b></label>
+      <input type="range" id="M" min="40" max="220" value="67">
+      <div class="h">İki adım = bir çevrim. <b>167 ms ve üstü</b> 3 Hz'in altına iner,
+        WCAG hız kuralını da sağlarsın.</div></div>
+    <div class="sl"><label>sıklık FS_K<b id="vK"></b></label>
+      <input type="range" id="K" min="10" max="90" value="40"></div>
+    <div class="sl"><label>şerit FS_BAND<b id="vB"></b></label>
+      <input type="range" id="B" min="4" max="20" value="12"></div>
+
+    <h3>Zaman biçimi</h3>
+    <button id="bMode" class="on">sert çevirme (oyundaki)</button>
+    <div class="h" style="color:var(--dim);font-size:11px;margin:-2px 0 8px">
+      Tıkla: yumuşak kosinüs. Aynı karşı-faz, ama parlaklık sıçramıyor,
+      sinüzoidal geçiyor. Klasik ders kitabı uyaranı bu.</div>
+
+    <h3>Ölçüm (WCAG 2.3.1)</h3>
+    <div class="h" style="color:var(--dim);font-size:11px;margin:0 0 6px">
+      <b>Bu tezgâh AYAR içindir, beyan için değil.</b> Buradaki tüp sabit bir
+      620×120 kutuda; oyundaki tüp portalların yerine göre değişiyor. Yayınlanan
+      rakam gerçek karelerden ölçüldü: 21 bölümün her birinde en uzak portal
+      çifti (en uzun tüp) denendi, çakan alan en kötü halde <b>%0.44</b>
+      (eşik %25). Ölçen araç: <code>arac/wcag.js</code>.</div>
+    <table>
+      <tr><td>çakma hızı</td><td id="mHz"></td></tr>
+      <tr><td>çakan alan</td><td id="mArea"></td></tr>
+      <tr><td>ort. parlaklık farkı</td><td id="mDiff"></td></tr>
+      <tr><td>en büyük fark</td><td id="mMax"></td></tr>
+    </table>
+    <div id="verdict"></div>
+
+    <h3>Oyuna yapıştır</h3>
+    <textarea id="out" readonly spellcheck="false"></textarea>
+  </div>
+</div>
+
+<script>
+/* Oyunun drawTube'undan birebir alinan geometri ve cizim dongusu.
+   Fark yok: ayni bezier, ayni tubeAt, ayni hsl formulu. */
+const TAU=Math.PI*2, TB_H0=2, TB_H1=288, FS_L0=50, FS_SAT=92, FS_NT=28, T=24;
+const P={A:12,M:67,K:4.0,B:12};
+let smooth=0;
+
+const bezP=(p,t)=>{const u=1-t,a=u*u*u,b=3*u*u*t,c=3*u*t*t,d=t*t*t;
+  return{x:a*p[0].x+b*p[1].x+c*p[2].x+d*p[3].x,y:a*p[0].y+b*p[1].y+c*p[2].y+d*p[3].y};};
+const bezD=(p,t)=>{const u=1-t;
+  return{x:3*u*u*(p[1].x-p[0].x)+6*u*t*(p[2].x-p[1].x)+3*t*t*(p[3].x-p[2].x),
+         y:3*u*u*(p[1].y-p[0].y)+6*u*t*(p[2].y-p[1].y)+3*t*t*(p[3].y-p[2].y)};};
+function tubeAt(p,t){const c=bezP(p,t),d=bezD(p,t),L=Math.hypot(d.x,d.y)||1;
+  return{x:c.x,y:c.y,nx:-d.y/L,ny:d.x/L,w:T*0.74*(1+0.16*Math.sin(t*Math.PI))};}
+
+const A0={px:40,py:82,nx:1,ny:0}, B0={px:580,py:40,nx:-1,ny:0};
+function ctrl(){const d=Math.hypot(B0.px-A0.px,B0.py-A0.py)*0.42+26;
+  return[{x:A0.px,y:A0.py},{x:A0.px+A0.nx*d,y:A0.py+A0.ny*d},
+         {x:B0.px+B0.nx*d,y:B0.py+B0.ny*d},{x:B0.px,y:B0.py}];}
+
+/* sg: -1..+1 arasi kontrast isareti. Sert = kare dalga, yumusak = kosinus. */
+function sgAt(ms,msStep){
+  const ph=ms/(msStep*2);                 // iki adim = bir cevrim
+  return smooth ? Math.cos(TAU*ph) : ((ms/msStep|0)&1?-1:1);
+}
+function drawTube(X,amp,ms,msStep,K,BAND){
+  X.clearRect(0,0,620,120);
+  const p=ctrl(), ring=[];
+  for(let i=0;i<=FS_NT;i++)ring.push(tubeAt(p,i/FS_NT));
+  const sg=sgAt(ms,msStep);
+  for(let j=0;j<BAND;j++){
+    const u0=-1+2*j/BAND,u1=-1+2*(j+1)/BAND,f=(j+0.5)/BAND;
+    const hue=TB_H0+(TB_H1-TB_H0)*f;
+    for(let i=0;i<FS_NT;i++){
+      const tm=(i+0.5)/FS_NT;
+      const m=Math.sin(TAU*K*tm)*sg;
+      X.fillStyle=`hsl(${hue} ${FS_SAT}% ${FS_L0+amp*m}%)`;
+      const a=ring[i],b=ring[i+1];
+      X.beginPath();
+      X.moveTo(a.x+a.nx*a.w*u0,a.y+a.ny*a.w*u0);
+      X.lineTo(b.x+b.nx*b.w*u0,b.y+b.ny*b.w*u0);
+      X.lineTo(b.x+b.nx*b.w*u1,b.y+b.ny*b.w*u1);
+      X.lineTo(a.x+a.nx*a.w*u1,a.y+a.ny*a.w*u1);
+      X.closePath();X.fill();
+    }
+  }
+  X.strokeStyle='rgba(16,20,38,0.7)';X.lineWidth=1.3;
+  for(const s of[-1,1]){X.beginPath();
+    for(let i=0;i<=22;i++){const q=tubeAt(p,i/22);
+      const x=q.x+q.nx*q.w*s,y=q.y+q.ny*q.w*s;i?X.lineTo(x,y):X.moveTo(x,y);}
+    X.stroke();}
+}
+
+const CT=[0,1,2,3].map(i=>document.getElementById('t'+i).getContext('2d'));
+
+/* --- WCAG olcumu: iki uc durumu gizli tuvale cizip parlaklik farkina bak --- */
+const off=document.createElement('canvas');off.width=620;off.height=120;
+const OX=off.getContext('2d',{willReadFrequently:true});
+const lin=v=>{v/=255;return v<=.04045?v/12.92:((v+.055)/1.055)**2.4;};
+const relL=d=>{const n=d.length/4,o=new Float64Array(n);
+  for(let i=0;i<n;i++)o[i]=.2126*lin(d[i*4])+.7152*lin(d[i*4+1])+.0722*lin(d[i*4+2]);
+  return o;};
+function olc(){
+  drawTube(OX,P.A,0,P.M,P.K,P.B|0);
+  const a=relL(OX.getImageData(0,0,620,120).data);
+  drawTube(OX,P.A,P.M,P.M,P.K,P.B|0);          // zit durum
+  const b=relL(OX.getImageData(0,0,620,120).data);
+  let flas=0,sum=0,cnt=0,mx=0;
+  for(let i=0;i<a.length;i++){
+    const d=Math.abs(a[i]-b[i]);
+    if(d>mx)mx=d;
+    if(d>.004){sum+=d;cnt++;}
+    if(d>=.10&&Math.min(a[i],b[i])<.80)flas++;
+  }
+  // oyun tuvali 624x336; boru bu tezgahta 620x120 icinde
+  const oran=flas/(624*336)*100;
+  const hz=1000/(P.M*2);
+  document.getElementById('mHz').textContent=hz.toFixed(1)+' Hz';
+  document.getElementById('mArea').textContent='%'+oran.toFixed(2);
+  document.getElementById('mDiff').textContent=(cnt?sum/cnt:0).toFixed(3);
+  document.getElementById('mMax').textContent=mx.toFixed(3);
+  const hizOK=hz<=3, alanOK=oran<25;
+  const v=document.getElementById('verdict');
+  if(hizOK){v.style.background='#15321f';v.style.border='1px solid #2f6b43';
+    v.innerHTML='<b class="v-ok">Tam güvenli.</b> 3 Hz altındasın, alan kuralına hiç ihtiyaç yok.';}
+  else if(alanOK){v.style.background='#33290f';v.style.border='1px solid #6b5418';
+    v.innerHTML='<b class="v-warn">Alan istisnasıyla geçiyor.</b> Hız 3 Hz üstü ama çakan alan '+
+      'ekranın %25\'inden küçük. Kabul edilebilir; genliği düşük tuttukça payın artar.';}
+  else{v.style.background='#3a1519';v.style.border='1px solid #7a2630';
+    v.innerHTML='<b class="v-bad">Sınırı aşıyor.</b> Hem 3 Hz üstü hem alan %25 üzeri.';}
+  document.getElementById('out').value=
+`const FS_BAND=${P.B|0};
+const FS_K=${P.K.toFixed(1)};
+const FS_MS=${P.M|0};
+const FS_AMP=${P.A|0};`+(smooth?`
+// yumusak: drawTube icinde
+// const sg=Math.cos(TAU*performance.now()/(FS_MS*2));`:'');
+}
+
+/* --- kaydiricilar --- */
+const SC={A:1,M:1,K:10,B:1}, FM={A:0,M:0,K:1,B:0};
+['A','M','K','B'].forEach(id=>{
+  const el=document.getElementById(id),lb=document.getElementById('v'+id);
+  const f=()=>{P[id]=+el.value/SC[id];lb.textContent=P[id].toFixed(FM[id]);olc();};
+  el.oninput=f;f();
+});
+document.getElementById('bMode').onclick=function(){
+  smooth=1-smooth;this.classList.toggle('on',!smooth);
+  this.textContent=smooth?'yumuşak kosinüs':'sert çevirme (oyundaki)';olc();};
+
+(function L(){
+  const ms=performance.now();
+  drawTube(CT[0],P.A,ms,P.M,P.K,P.B|0);
+  drawTube(CT[1],22 ,ms,P.M,P.K,P.B|0);
+  drawTube(CT[2],8  ,ms,P.M,P.K,P.B|0);
+  drawTube(CT[3],P.A,0 ,P.M,P.K,P.B|0);   // donmus: illuzyon olmamali
+  document.getElementById('c0').textContent='genlik '+(P.A|0);
+  requestAnimationFrame(L);
+})();
+</script>
+</body>
+</html>
