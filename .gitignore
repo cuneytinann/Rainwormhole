@@ -3,4 +3,5 @@ gunbatimi-temali.html
 node_modules/
 *.log
 *.bat
+.gitignore
 wavedash-index.html
