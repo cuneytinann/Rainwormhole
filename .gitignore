@@ -2,7 +2,5 @@ DEVIR-TESLIM.md
 gunbatimi-temali.html
 node_modules/
 *.log
-bat.bat
-wavedash-index.html
-
+*.bat
 wavedash-index.html
