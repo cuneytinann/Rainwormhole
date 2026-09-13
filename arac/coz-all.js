@@ -1,9 +1,9 @@
-/* coz-all.js — 21 bolumun 18'inin SCRIPTLI cozumu.
+/* coz-all.js — 19 bolumun 16'sinin SCRIPTLI cozumu.
    Her biri amaclanan cozumu tus tus oynar ve cikisa ulasildigini dogrular.
    Motorda bir sey degistirdiysen ONCE bunu kosur. Iki motor hatasi bununla
    bulundu (dikey momentum, zemin portali giris payi) — oynayarak degil.
    Kullanim: node arac/coz-all.js ../rainwormhole.html
-   Cozumu olmayanlar: 6 (kup), 8 (hendek), 21 (final). */
+   Cozumu olmayanlar: 6 (kup), 8 (hendek), 20 (final). 16 (yumusak inis) SILINDI. */
 const {coz}=require('./cozum.js');
 const F=process.argv[2]||'../rainwormhole.html';
 let ok=true;
@@ -63,35 +63,22 @@ ok&=coz(F,14,[
   ['key','d',60],['keys',{d:1,w:1},14],['key','d',120],['keys',{d:1,w:1},14],['key','d',80],['wait',10],
 ],{ad:'15 prizma+kup'});
 ok&=coz(F,15,[
-  ['key','a',1],['pos'],
-  ['aim',132,300],['fire',1],['pos'],
-  ['key','d',1],['aim',612,180],['fire',0],['pos'],
-  ['key','d',14],['wait',90],['pos'],['wait',30],
-],{ad:'16 yumusak inis'});
-ok&=coz(F,16,[
   ['key','d',20],['grab'],['check',G=>!!G.carried,'kup alinmadi'],
   ['key','d',190],['wait',10],
-],{ad:'17 kalkan'});
-ok&=coz(F,17,[
+],{ad:'16 kalkan'});
+ok&=coz(F,16,[
   ['key','d',30],['key','a',1],['pos'],['check',G=>G.gateOn,'dugme basili degil'],
   ['aim',12,110],['fire',0],['aim',612,228],['fire',1],
   ['check',G=>G.rOn===1,'R yanmadi'],
   ['key','d',40],['pos'],['check',G=>G.gateOn,'mandal tutmadi: dugmeden inince kapi kapandi'],
   ['key','d',160],['wait',10],
-],{ad:'18 mandal'});
-ok&=coz(F,18,[
-  ['key','a',3],['pos'],
-  ['aim',12,60],['fire',0],            // sola bak: ust hedef boynuz
-  ['key','d',1],['aim',24,252],['fire',1],   // saga don: alt hedef arkada-asagida, kuyruk bosluktan gecer
-  ['check',G=>G.rOn===1,'R yanmadi'],
-  ['key','d',210],['wait',10],
-],{ad:'19 tek duvar'});
-ok&=coz(F,19,[
+],{ad:'17 mandal'});
+ok&=coz(F,17,[
   ['key','d',16],['key','a',1],['aim',104,300],['fire',1],
   ['key','a',40],['wait',40],['key','d',40],['wait',6],['pos'],
   ['aim',492,22],['fire',0],['wait',80],['pos'],
   ['check',G=>G.lz.length&&G.lz[0][2]>460,'ors isini kesmedi'],
   ['key','d',24],['keys',{d:1,w:1},18],['key','d',130],['wait',10],
-],{ad:'20 ors kalkan'});
+],{ad:'18 ors kalkan'});
 console.log(ok?'\nHEPSI COZULDU':'\nEKSIK VAR');
 process.exit(ok?0:1);
